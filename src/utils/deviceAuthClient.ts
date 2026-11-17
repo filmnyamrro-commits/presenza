@@ -69,6 +69,30 @@ export function getDefaultDeviceLabel(): string {
   return `${browser} · ${os}`;
 }
 
+export class DeviceApiError extends Error {
+  status: number;
+  isApiUnavailable: boolean;
+
+  constructor(message: string, status: number, isApiUnavailable = false) {
+    super(message);
+    this.name = 'DeviceApiError';
+    this.status = status;
+    this.isApiUnavailable = isApiUnavailable;
+  }
+}
+
+async function parseJsonSafe<T>(resp: Response): Promise<T | null> {
+  const contentType = resp.headers.get('content-type') || '';
+  if (!contentType.toLowerCase().includes('application/json')) {
+    return null;
+  }
+  try {
+    return (await resp.json()) as T;
+  } catch {
+    return null;
+  }
+}
+
 export interface DeviceStatusResponse {
   authorized: boolean;
   revoked?: boolean;
@@ -88,10 +112,15 @@ export async function checkDeviceAuthStatus(): Promise<DeviceStatusResponse> {
     body: JSON.stringify({ deviceToken: token || undefined }),
   });
 
-  if (!resp.ok) {
-    throw new Error('Unable to verify device authorization status.');
+  const data = await parseJsonSafe<DeviceStatusResponse & { error?: string }>(resp);
+  if (!resp.ok || !data) {
+    const unavailable = resp.status === 404 || resp.status === 405 || !data;
+    throw new DeviceApiError(
+      data?.error || 'Unable to verify device authorization status.',
+      resp.status,
+      unavailable
+    );
   }
-  const data = (await resp.json()) as DeviceStatusResponse;
   if (!data.authorized) {
     clearStoredDeviceToken();
   }
@@ -117,9 +146,14 @@ export async function requestOwnerVerificationCode(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ deviceId, deviceName }),
   });
-  const data = (await resp.json()) as RequestCodeResponse & { error?: string };
-  if (!resp.ok) {
-    throw new Error(data.error || 'Failed to request verification code.');
+  const data = await parseJsonSafe<RequestCodeResponse & { error?: string }>(resp);
+  if (!resp.ok || !data) {
+    const unavailable = resp.status === 404 || resp.status === 405 || !data;
+    throw new DeviceApiError(
+      data?.error || 'Failed to request verification code.',
+      resp.status,
+      unavailable
+    );
   }
   return data;
 }
@@ -145,9 +179,14 @@ export async function verifyDeviceCode(params: {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),
   });
-  const data = (await resp.json()) as VerifyCodeResponse & { error?: string };
-  if (!resp.ok) {
-    throw new Error(data.error || 'Invalid verification code.');
+  const data = await parseJsonSafe<VerifyCodeResponse & { error?: string }>(resp);
+  if (!resp.ok || !data) {
+    const unavailable = resp.status === 404 || resp.status === 405 || !data;
+    throw new DeviceApiError(
+      data?.error || 'Invalid verification code.',
+      resp.status,
+      unavailable
+    );
   }
   if (data.deviceToken) {
     setStoredDeviceToken(data.deviceToken);
@@ -171,12 +210,13 @@ export async function pollDirectOwnerApproval(
     body: JSON.stringify({ deviceId, challengeId }),
   });
   if (!resp.ok) return { approved: false };
-  const data = (await resp.json()) as {
+  const data = await parseJsonSafe<{
     approved: boolean;
     message?: string;
     deviceToken?: string;
     device?: AuthorizedDeviceRecord;
-  };
+  }>(resp);
+  if (!data) return { approved: false };
   if (data.approved && data.deviceToken) {
     setStoredDeviceToken(data.deviceToken);
   }
@@ -197,9 +237,14 @@ export async function authorizeCurrentDeviceAsOwner(
     },
     body: JSON.stringify({ deviceId, deviceName }),
   });
-  const data = (await resp.json()) as VerifyCodeResponse & { error?: string };
-  if (!resp.ok) {
-    throw new Error(data.error || 'Owner device authorization failed.');
+  const data = await parseJsonSafe<VerifyCodeResponse & { error?: string }>(resp);
+  if (!resp.ok || !data) {
+    const unavailable = resp.status === 404 || resp.status === 405 || !data;
+    throw new DeviceApiError(
+      data?.error || 'Owner device authorization failed.',
+      resp.status,
+      unavailable
+    );
   }
   if (data.deviceToken) {
     setStoredDeviceToken(data.deviceToken);
@@ -225,9 +270,13 @@ export async function fetchOwnerDeviceOverview(
     method: 'GET',
     headers: { Authorization: `Bearer ${idToken}` },
   });
-  const data = (await resp.json()) as OwnerDeviceOverview & { error?: string };
-  if (!resp.ok) {
-    throw new Error(data.error || 'Unable to load authorized devices.');
+  const data = await parseJsonSafe<OwnerDeviceOverview & { error?: string }>(resp);
+  if (!resp.ok || !data) {
+    throw new DeviceApiError(
+      data?.error || 'Unable to load authorized devices.',
+      resp.status,
+      resp.status === 404 || resp.status === 405 || !data
+    );
   }
   return data;
 }
@@ -251,16 +300,16 @@ export async function generateOwnerInviteCode(
     },
     body: JSON.stringify({ deviceName, sendEmail }),
   });
-  const data = (await resp.json()) as {
+  const data = await parseJsonSafe<{
     ok: boolean;
     challengeId: string;
     code: string;
     expiresAtIso: string;
     emailSent: boolean;
     error?: string;
-  };
-  if (!resp.ok) {
-    throw new Error(data.error || 'Unable to generate verification code.');
+  }>(resp);
+  if (!resp.ok || !data) {
+    throw new Error(data?.error || 'Unable to generate verification code.');
   }
   return data;
 }
@@ -278,13 +327,13 @@ export async function approvePendingDeviceRequest(
     },
     body: JSON.stringify({ challengeId, deviceId }),
   });
-  const data = (await resp.json()) as {
+  const data = await parseJsonSafe<{
     ok: boolean;
     device: AuthorizedDeviceRecord;
     error?: string;
-  };
-  if (!resp.ok) {
-    throw new Error(data.error || 'Unable to approve device request.');
+  }>(resp);
+  if (!resp.ok || !data) {
+    throw new Error(data?.error || 'Unable to approve device request.');
   }
   return data.device;
 }
@@ -301,13 +350,13 @@ export async function revokeDeviceAccess(
     },
     body: JSON.stringify({ deviceId }),
   });
-  const data = (await resp.json()) as {
+  const data = await parseJsonSafe<{
     ok: boolean;
     device: AuthorizedDeviceRecord;
     error?: string;
-  };
-  if (!resp.ok) {
-    throw new Error(data.error || 'Unable to revoke device access.');
+  }>(resp);
+  if (!resp.ok || !data) {
+    throw new Error(data?.error || 'Unable to revoke device access.');
   }
   return data.device;
 }
@@ -325,14 +374,14 @@ export async function restoreOrRemoveDeviceAccess(
     },
     body: JSON.stringify({ deviceId, remove }),
   });
-  const data = (await resp.json()) as {
+  const data = await parseJsonSafe<{
     ok: boolean;
     device?: AuthorizedDeviceRecord;
     removed?: boolean;
     error?: string;
-  };
-  if (!resp.ok) {
-    throw new Error(data.error || 'Unable to update device status.');
+  }>(resp);
+  if (!resp.ok || !data) {
+    throw new Error(data?.error || 'Unable to update device status.');
   }
   return data;
 }
@@ -349,13 +398,13 @@ export async function updateDeviceSecurityPolicy(
     },
     body: JSON.stringify(policy),
   });
-  const data = (await resp.json()) as {
+  const data = await parseJsonSafe<{
     ok: boolean;
     policy: DeviceSecurityPolicy;
     error?: string;
-  };
-  if (!resp.ok) {
-    throw new Error(data.error || 'Unable to update security policy.');
+  }>(resp);
+  if (!resp.ok || !data) {
+    throw new Error(data?.error || 'Unable to update security policy.');
   }
   return data.policy;
 }

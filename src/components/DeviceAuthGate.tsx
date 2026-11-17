@@ -1,6 +1,12 @@
-import { signInWithPopup } from 'firebase/auth';
+import {
+  getRedirectResult,
+  signInWithPopup,
+  signInWithRedirect,
+  type User,
+} from 'firebase/auth';
 import {
   CheckCircle2,
+  ExternalLink,
   KeyRound,
   Laptop,
   Loader2,
@@ -9,9 +15,10 @@ import {
   ShieldCheck,
   Timer,
 } from 'lucide-react';
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   auth,
+  type AuthErrorDetails,
   BOOTSTRAPPED_ADMIN_EMAIL,
   formatFirebaseAuthError,
   googleProvider,
@@ -22,6 +29,7 @@ import {
   authorizeCurrentDeviceAsOwner,
   checkDeviceAuthStatus,
   clearStoredDeviceToken,
+  DeviceApiError,
   getDefaultDeviceLabel,
   getOrCreateLocalDeviceId,
   pollDirectOwnerApproval,
@@ -32,15 +40,39 @@ import {
 interface DeviceAuthGateProps {
   branding?: OrganizationBranding | null;
   isDirectQrLink: boolean;
+  user: User | null;
+  authReady: boolean;
   children: ReactNode;
+}
+
+function isPrimaryOwnerUser(u: User | null): boolean {
+  return Boolean(
+    u &&
+      u.email &&
+      u.emailVerified &&
+      normalizeAdminEmail(u.email) === BOOTSTRAPPED_ADMIN_EMAIL
+  );
+}
+
+function isEmbeddedInIframe(): boolean {
+  try {
+    return window.self !== window.top;
+  } catch {
+    return true;
+  }
 }
 
 export default function DeviceAuthGate({
   branding,
   isDirectQrLink,
+  user,
+  authReady,
   children,
 }: DeviceAuthGateProps) {
   const deviceId = useMemo(() => getOrCreateLocalDeviceId(), []);
+  const inIframe = useMemo(() => isEmbeddedInIframe(), []);
+
+  const [deviceCheckDone, setDeviceCheckDone] = useState(false);
   const [status, setStatus] = useState<
     'checking' | 'unauthorized' | 'welcome' | 'authorized'
   >('checking');
@@ -55,12 +87,60 @@ export default function DeviceAuthGate({
   const [requestingCode, setRequestingCode] = useState(false);
   const [verifyingCode, setVerifyingCode] = useState(false);
   const [ownerSigningIn, setOwnerSigningIn] = useState(false);
+  const [autoAuthorizingOwner, setAutoAuthorizingOwner] = useState(false);
 
   const [deliveryNotice, setDeliveryNotice] = useState<string | null>(null);
   const [emailSent, setEmailSent] = useState<boolean | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [ownerAuthError, setOwnerAuthError] = useState<AuthErrorDetails | null>(
+    null
+  );
   const [welcomeMessage, setWelcomeMessage] = useState<string>(
     'Device successfully authenticated. Welcome!'
+  );
+
+  const manualSignInInFlightRef = useRef(false);
+  const autoAttemptedUidRef = useRef<string | null>(null);
+  const userRef = useRef<User | null>(user);
+  userRef.current = user;
+  const authReadyRef = useRef<boolean>(authReady);
+  authReadyRef.current = authReady;
+
+  const authorizeVerifiedOwnerUser = useCallback(
+    async (
+      ownerUser: User,
+      options: { showWelcomeScreen: boolean }
+    ): Promise<boolean> => {
+      const idToken = await ownerUser.getIdToken(true);
+      const label = deviceLabel.trim() || getDefaultDeviceLabel();
+      try {
+        const res = await authorizeCurrentDeviceAsOwner(
+          idToken,
+          deviceId,
+          label
+        );
+        setWasRevoked(false);
+        setOwnerAuthError(null);
+        setErrorMessage(null);
+        setWelcomeMessage(
+          res.message || 'Device successfully authenticated. Welcome!'
+        );
+        setStatus(options.showWelcomeScreen ? 'welcome' : 'authorized');
+        return true;
+      } catch (err) {
+        if (err instanceof DeviceApiError && err.isApiUnavailable) {
+          // Backend device-auth API unavailable (e.g. static hosting):
+          // Firebase Auth already cryptographically verified the Primary Owner.
+          setWasRevoked(false);
+          setOwnerAuthError(null);
+          setErrorMessage(null);
+          setStatus(options.showWelcomeScreen ? 'welcome' : 'authorized');
+          return true;
+        }
+        throw err;
+      }
+    },
+    [deviceId, deviceLabel]
   );
 
   const performStatusCheck = useCallback(
@@ -76,15 +156,38 @@ export default function DeviceAuthGate({
         ) {
           setWasRevoked(false);
           setStatus('authorized');
+          setDeviceCheckDone(true);
           return;
         }
         if (res.revoked) {
           setWasRevoked(true);
         }
-        setStatus((prev) => (prev === 'welcome' ? 'welcome' : 'unauthorized'));
-      } catch {
-        // Keep current status on transient network blips if already authorized
-        setStatus((prev) => (prev === 'authorized' ? 'authorized' : 'unauthorized'));
+        setDeviceCheckDone(true);
+        setStatus((prev) => {
+          if (prev === 'welcome') return 'welcome';
+          // Wait for authReady before revealing the unauthorized screen so an active
+          // Primary Owner session can auto-authorize seamlessly without flashing a lock screen.
+          if (!authReadyRef.current) return 'checking';
+          if (isPrimaryOwnerUser(userRef.current) && !res.revoked) {
+            return 'checking';
+          }
+          return 'unauthorized';
+        });
+      } catch (err) {
+        setDeviceCheckDone(true);
+        if (
+          err instanceof DeviceApiError &&
+          err.isApiUnavailable &&
+          isPrimaryOwnerUser(userRef.current)
+        ) {
+          setStatus('authorized');
+          return;
+        }
+        setStatus((prev) => {
+          if (prev === 'authorized') return 'authorized';
+          if (!authReadyRef.current) return 'checking';
+          return 'unauthorized';
+        });
       }
     },
     [isDirectQrLink]
@@ -93,6 +196,110 @@ export default function DeviceAuthGate({
   useEffect(() => {
     void performStatusCheck(false);
   }, [performStatusCheck]);
+
+  // Pick up Google OAuth redirect result if signInWithRedirect was used
+  useEffect(() => {
+    let active = true;
+    async function checkRedirect() {
+      try {
+        const cred = await getRedirectResult(auth);
+        if (!active || !cred?.user) return;
+        if (!isPrimaryOwnerUser(cred.user)) {
+          clearStoredDeviceToken();
+          setOwnerAuthError({
+            code: 'auth/owner-only',
+            title: 'Not Primary Owner Account',
+            message: `Signed in as ${cred.user.email || 'unknown account'}. Only the primary owner (${BOOTSTRAPPED_ADMIN_EMAIL}) can authorize a new device directly. Please request a verification code from the owner.`,
+          });
+          setStatus('unauthorized');
+          return;
+        }
+        setAutoAuthorizingOwner(true);
+        await authorizeVerifiedOwnerUser(cred.user, {
+          showWelcomeScreen: true,
+        });
+      } catch (err) {
+        if (!active) return;
+        const formatted = formatFirebaseAuthError(err);
+        setOwnerAuthError(formatted);
+        setStatus('unauthorized');
+      } finally {
+        if (active) {
+          setAutoAuthorizingOwner(false);
+        }
+      }
+    }
+    void checkRedirect();
+    return () => {
+      active = false;
+    };
+  }, [authorizeVerifiedOwnerUser]);
+
+  // Automatic Primary Owner Login: if Firebase Auth already holds a verified
+  // rohantmr.lover@gmail.com session (and this device wasn't explicitly revoked),
+  // automatically authorize this device and log the owner in with zero clicks.
+  useEffect(() => {
+    if (!authReady || !deviceCheckDone) return;
+    if (status === 'authorized' || status === 'welcome') return;
+    if (manualSignInInFlightRef.current) return;
+
+    if (!user || !isPrimaryOwnerUser(user)) {
+      if (status === 'checking') {
+        setStatus('unauthorized');
+      }
+      return;
+    }
+
+    if (wasRevoked) {
+      if (status === 'checking') {
+        setStatus('unauthorized');
+      }
+      return;
+    }
+
+    if (autoAttemptedUidRef.current === user.uid) {
+      if (status === 'checking') {
+        setStatus('unauthorized');
+      }
+      return;
+    }
+
+    let cancelled = false;
+    autoAttemptedUidRef.current = user.uid;
+    setAutoAuthorizingOwner(true);
+
+    void (async () => {
+      try {
+        await authorizeVerifiedOwnerUser(user, { showWelcomeScreen: false });
+      } catch (err) {
+        if (cancelled) return;
+        setOwnerAuthError({
+          code: 'device-auth/auto-login-failed',
+          title: 'Automatic Owner Sign-In Needs Retry',
+          message:
+            err instanceof Error
+              ? err.message
+              : 'Could not complete automatic owner device authorization.',
+        });
+        setStatus('unauthorized');
+      } finally {
+        if (!cancelled) {
+          setAutoAuthorizingOwner(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    authReady,
+    deviceCheckDone,
+    status,
+    user,
+    wasRevoked,
+    authorizeVerifiedOwnerUser,
+  ]);
 
   // Periodic background verification so revoked devices lose access promptly
   useEffect(() => {
@@ -151,12 +358,13 @@ export default function DeviceAuthGate({
     if (status !== 'welcome') return;
     const timer = window.setTimeout(() => {
       setStatus('authorized');
-    }, 1600);
+    }, 1400);
     return () => window.clearTimeout(timer);
   }, [status]);
 
   const handleRequestCode = async () => {
     setErrorMessage(null);
+    setOwnerAuthError(null);
     setDeliveryNotice(null);
     setRequestingCode(true);
     try {
@@ -185,6 +393,7 @@ export default function DeviceAuthGate({
       return;
     }
     setErrorMessage(null);
+    setOwnerAuthError(null);
     setVerifyingCode(true);
     try {
       const res = await verifyDeviceCode({
@@ -209,34 +418,70 @@ export default function DeviceAuthGate({
 
   const handleOwnerBootstrapSignIn = async () => {
     setErrorMessage(null);
+    setOwnerAuthError(null);
     setOwnerSigningIn(true);
+    manualSignInInFlightRef.current = true;
+
     try {
-      const cred = await signInWithPopup(auth, googleProvider);
-      const emailLower = cred.user.email
-        ? normalizeAdminEmail(cred.user.email)
-        : '';
-      if (emailLower !== BOOTSTRAPPED_ADMIN_EMAIL) {
-        clearStoredDeviceToken();
-        setErrorMessage(
-          `Signed in as ${cred.user.email || 'unknown account'}. Only the primary owner (${BOOTSTRAPPED_ADMIN_EMAIL}) can authorize a new device directly. Please request a verification code from the owner.`
-        );
+      // If Firebase Auth already holds a verified Primary Owner session,
+      // authorize this device immediately without even forcing another Google popup.
+      const existingOwner = auth.currentUser;
+      if (existingOwner && isPrimaryOwnerUser(existingOwner)) {
+        await authorizeVerifiedOwnerUser(existingOwner, {
+          showWelcomeScreen: true,
+        });
         return;
       }
-      const idToken = await cred.user.getIdToken(true);
-      const res = await authorizeCurrentDeviceAsOwner(
-        idToken,
-        deviceId,
-        deviceLabel.trim() || getDefaultDeviceLabel()
-      );
-      setWasRevoked(false);
-      setWelcomeMessage(
-        res.message || 'Device successfully authenticated. Welcome!'
-      );
-      setStatus('welcome');
+
+      const cred = await signInWithPopup(auth, googleProvider);
+      if (!isPrimaryOwnerUser(cred.user)) {
+        clearStoredDeviceToken();
+        setOwnerAuthError({
+          code: 'auth/owner-only',
+          title: 'Primary Owner Account Required',
+          message: `Signed in as ${cred.user.email || 'unknown account'}. Only the primary owner (${BOOTSTRAPPED_ADMIN_EMAIL}) can authorize a new device directly. Please request a verification code from the owner.`,
+        });
+        return;
+      }
+
+      await authorizeVerifiedOwnerUser(cred.user, {
+        showWelcomeScreen: true,
+      });
     } catch (err) {
-      const formatted = formatFirebaseAuthError(err);
-      setErrorMessage(formatted.message);
+      const code =
+        typeof err === 'object' && err !== null && 'code' in err
+          ? String((err as { code?: unknown }).code || '')
+          : '';
+
+      if (
+        !inIframe &&
+        (code === 'auth/popup-blocked' ||
+          code === 'auth/operation-not-supported-in-this-environment')
+      ) {
+        try {
+          await signInWithRedirect(auth, googleProvider);
+          return;
+        } catch (redirectErr) {
+          setOwnerAuthError(formatFirebaseAuthError(redirectErr));
+          return;
+        }
+      }
+
+      setOwnerAuthError(formatFirebaseAuthError(err));
     } finally {
+      manualSignInInFlightRef.current = false;
+      setOwnerSigningIn(false);
+    }
+  };
+
+  const handleOwnerRedirectSignIn = async () => {
+    setErrorMessage(null);
+    setOwnerAuthError(null);
+    setOwnerSigningIn(true);
+    try {
+      await signInWithRedirect(auth, googleProvider);
+    } catch (err) {
+      setOwnerAuthError(formatFirebaseAuthError(err));
       setOwnerSigningIn(false);
     }
   };
@@ -250,12 +495,14 @@ export default function DeviceAuthGate({
   const mins = Math.floor(remainingSec / 60);
   const secs = remainingSec % 60;
 
-  if (status === 'checking') {
+  if (status === 'checking' || autoAuthorizingOwner) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center px-4 text-center">
         <Loader2 className="w-8 h-8 animate-spin text-blue-700" />
         <p className="mt-3 text-sm font-medium text-slate-600">
-          Verifying device authorization...
+          {autoAuthorizingOwner
+            ? 'Signing in primary owner automatically...'
+            : 'Verifying device authorization...'}
         </p>
       </div>
     );
@@ -329,7 +576,7 @@ export default function DeviceAuthGate({
             >
               <ShieldAlert className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
               <span>
-                This device&apos;s previous authorization was revoked by the owner. Request and enter a new verification code to regain access.
+                This device&apos;s previous authorization was revoked by the owner. Request and enter a new verification code (or sign in as primary owner) to regain access.
               </span>
             </div>
           )}
@@ -454,8 +701,36 @@ export default function DeviceAuthGate({
           {/* Primary Owner Google Auth Option */}
           <div className="pt-4 border-t border-slate-200 space-y-2.5 text-center">
             <p className="text-xs text-slate-500">
-              Primary owner (<span className="font-semibold text-slate-700">{BOOTSTRAPPED_ADMIN_EMAIL}</span>)? Sign in directly with Google to authorize this device:
+              Primary owner (<span className="font-semibold text-slate-700">{BOOTSTRAPPED_ADMIN_EMAIL}</span>)? Sign in with Google to authorize automatically:
             </p>
+
+            {ownerAuthError && (
+              <div
+                role="alert"
+                className="rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-3 text-xs text-rose-900 text-left space-y-1.5"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-bold text-rose-950">
+                    {ownerAuthError.title}
+                  </span>
+                  <span className="text-[10px] font-mono text-rose-700">
+                    {ownerAuthError.code}
+                  </span>
+                </div>
+                <p className="leading-relaxed text-rose-800">
+                  {ownerAuthError.message}
+                </p>
+                {ownerAuthError.helpSteps &&
+                  ownerAuthError.helpSteps.length > 0 && (
+                    <ol className="list-decimal pl-4 space-y-1 text-rose-800 pt-1">
+                      {ownerAuthError.helpSteps.map((step, idx) => (
+                        <li key={idx}>{step}</li>
+                      ))}
+                    </ol>
+                  )}
+              </div>
+            )}
+
             <button
               type="button"
               disabled={ownerSigningIn}
@@ -465,6 +740,32 @@ export default function DeviceAuthGate({
               {ownerSigningIn && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
               <span>Sign in as Primary Owner</span>
             </button>
+
+            {(ownerAuthError || inIframe) && (
+              <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                {inIframe && typeof window !== 'undefined' && (
+                  <a
+                    href={window.location.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-800 text-xs font-semibold transition-colors"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Open in New Tab to Sign In</span>
+                  </a>
+                )}
+                {!inIframe && (
+                  <button
+                    type="button"
+                    disabled={ownerSigningIn}
+                    onClick={() => void handleOwnerRedirectSignIn()}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-semibold transition-colors disabled:opacity-60"
+                  >
+                    <span>Use Google Redirect Sign-In</span>
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>

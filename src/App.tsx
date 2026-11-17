@@ -178,6 +178,8 @@ export default function App() {
       <DeviceAuthGate
         branding={branding}
         isDirectQrLink={isQrParticipantView}
+        user={user}
+        authReady={authReady}
       >
         <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
         {/* Top Bar */}

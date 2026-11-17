@@ -513,9 +513,11 @@ interface CachedCerts {
 }
 let certsCache: CachedCerts | null = null;
 
-async function getFirebasePublicCerts(): Promise<Record<string, string>> {
+async function getFirebasePublicCerts(
+  forceRefresh = false
+): Promise<Record<string, string>> {
   const now = Date.now();
-  if (certsCache && now < certsCache.expiresAtMs) {
+  if (!forceRefresh && certsCache && now < certsCache.expiresAtMs) {
     return certsCache.certs;
   }
 
@@ -560,8 +562,12 @@ async function verifyOwnerFirebaseIdToken(
     ) as { alg?: string; kid?: string };
     if (header.alg !== 'RS256' || !header.kid) return null;
 
-    const certs = await getFirebasePublicCerts();
-    const pem = certs[header.kid];
+    let certs = await getFirebasePublicCerts(false);
+    let pem = certs[header.kid];
+    if (!pem) {
+      certs = await getFirebasePublicCerts(true);
+      pem = certs[header.kid];
+    }
     if (!pem) return null;
 
     const verifier = crypto.createVerify('RSA-SHA256');
@@ -590,8 +596,8 @@ async function verifyOwnerFirebaseIdToken(
       return null;
     }
     if (typeof payload.sub !== 'string' || !payload.sub) return null;
-    if (typeof payload.exp !== 'number' || payload.exp <= nowSec - 30) return null;
-    if (typeof payload.iat !== 'number' || payload.iat > nowSec + 120) return null;
+    if (typeof payload.exp !== 'number' || payload.exp <= nowSec - 60) return null;
+    if (typeof payload.iat !== 'number' || payload.iat > nowSec + 300) return null;
     if (payload.email_verified !== true) return null;
     if (
       typeof payload.email !== 'string' ||
