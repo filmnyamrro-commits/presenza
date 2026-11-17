@@ -26,6 +26,8 @@ import {
   Trash2,
   UserPlus,
   Users,
+  Volume2,
+  VolumeX,
   X,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
@@ -73,6 +75,7 @@ import {
   type OrganizationBranding,
   type RecognitionCategory,
   type RecognitionTemplateConfig,
+  type VoiceAnnouncementSettings,
 } from '../types';
 import { exportAttendanceCsv } from '../utils/csvExport';
 import { compressJpegBackground, compressLogoFile } from '../utils/imageCompress';
@@ -98,13 +101,25 @@ import {
   mergeFeedbackConfig,
   mergeRecognitionTemplate,
 } from '../utils/feedbackAndRecognitionDefaults';
+import {
+  AnnouncementQueue,
+  DEFAULT_VOICE_SETTINGS,
+  mergeVoiceSettings,
+  stopAllAnnouncements,
+  unlockBrowserAudio,
+} from '../utils/voiceAnnouncement';
 import AdminFeedbackModule from './AdminFeedbackModule';
 import AdminRecognitionModule from './AdminRecognitionModule';
+import AdminVoiceSettingsModule from './AdminVoiceSettingsModule';
 import CertificateCustomizerModal from './CertificateCustomizerModal';
 import EventQrThumbnail from './EventQrThumbnail';
 import QrPosterModal from './QrPosterModal';
 
-export type AdminSectionTab = 'attendance' | 'feedback' | 'certificates';
+export type AdminSectionTab =
+  | 'attendance'
+  | 'feedback'
+  | 'certificates'
+  | 'voice';
 
 interface AdminConsoleProps {
   user: User | null;
@@ -235,6 +250,58 @@ export default function AdminConsole({
     IssuedCertificateRecord[]
   >([]);
 
+  // Module 3: AI Voice Check-in Announcement state
+  const [voiceSettings, setVoiceSettings] =
+    useState<VoiceAnnouncementSettings>(DEFAULT_VOICE_SETTINGS);
+  const [dashboardVoiceMuted, setDashboardVoiceMuted] = useState(false);
+  const [speakingParticipantName, setSpeakingParticipantName] = useState<
+    string | null
+  >(null);
+  const [dashboardAutoplayBlocked, setDashboardAutoplayBlocked] =
+    useState(false);
+
+  const voiceSettingsRef = useRef<VoiceAnnouncementSettings>(
+    DEFAULT_VOICE_SETTINGS
+  );
+  const dashboardVoiceMutedRef = useRef(false);
+  const initialAttendancesLoadedRef = useRef(false);
+  const knownAttendanceIdsRef = useRef<Set<string>>(new Set());
+  const announcementQueueRef = useRef<AnnouncementQueue | null>(null);
+
+  useEffect(() => {
+    voiceSettingsRef.current = voiceSettings;
+  }, [voiceSettings]);
+
+  useEffect(() => {
+    dashboardVoiceMutedRef.current = dashboardVoiceMuted;
+    if (dashboardVoiceMuted) {
+      announcementQueueRef.current?.clear();
+    }
+  }, [dashboardVoiceMuted]);
+
+  if (!announcementQueueRef.current) {
+    announcementQueueRef.current = new AnnouncementQueue(
+      () => voiceSettingsRef.current,
+      (state) => {
+        setSpeakingParticipantName(state.speakingName);
+        setDashboardAutoplayBlocked(state.autoplayBlocked);
+      }
+    );
+  }
+
+  useEffect(() => {
+    const unlockOnce = () => {
+      unlockBrowserAudio();
+      window.removeEventListener('pointerdown', unlockOnce);
+    };
+    window.addEventListener('pointerdown', unlockOnce, { passive: true });
+    return () => {
+      window.removeEventListener('pointerdown', unlockOnce);
+      announcementQueueRef.current?.clear();
+      stopAllAnnouncements();
+    };
+  }, []);
+
   // Authorized Administrators management state
   const [authorizedAdmins, setAuthorizedAdmins] = useState<
     AuthorizedAdminRecord[]
@@ -327,6 +394,10 @@ export default function AdminConsole({
       setRecognitionCategories([]);
       setRecognitionTemplate(DEFAULT_RECOGNITION_TEMPLATE);
       setIssuedCertificates([]);
+      setVoiceSettings(DEFAULT_VOICE_SETTINGS);
+      initialAttendancesLoadedRef.current = false;
+      knownAttendanceIdsRef.current = new Set();
+      announcementQueueRef.current?.clear();
       setLoadingData(false);
       return;
     }
@@ -366,6 +437,37 @@ export default function AdminConsole({
           const bt = b.serverTimestamp?.toMillis?.() ?? Number.MAX_SAFE_INTEGER;
           return at - bt;
         });
+
+        if (!initialAttendancesLoadedRef.current) {
+          knownAttendanceIdsRef.current = new Set(list.map((item) => item.id));
+          initialAttendancesLoadedRef.current = true;
+        } else {
+          const newlyAdded: AttendanceRecord[] = [];
+          for (const rec of list) {
+            if (!knownAttendanceIdsRef.current.has(rec.id)) {
+              knownAttendanceIdsRef.current.add(rec.id);
+              newlyAdded.push(rec);
+            }
+          }
+
+          const vs = voiceSettingsRef.current;
+          if (
+            newlyAdded.length > 0 &&
+            vs.enabled &&
+            vs.announceOnDashboard &&
+            !dashboardVoiceMutedRef.current
+          ) {
+            for (const rec of newlyAdded) {
+              announcementQueueRef.current?.enqueue({
+                id: rec.id,
+                participantName: rec.fullName,
+                department: rec.classDepartment,
+                eventTitle: rec.eventName,
+              });
+            }
+          }
+        }
+
         setAttendances(list);
       },
       (error) => {
@@ -534,6 +636,24 @@ export default function AdminConsole({
       }
     );
 
+    const unsubVoiceSettings = onSnapshot(
+      doc(db, 'voiceSettings', 'default'),
+      (snap) => {
+        if (snap.exists()) {
+          setVoiceSettings(
+            mergeVoiceSettings(
+              snap.data() as Partial<VoiceAnnouncementSettings>
+            )
+          );
+        } else {
+          setVoiceSettings(DEFAULT_VOICE_SETTINGS);
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.GET, 'voiceSettings/default');
+      }
+    );
+
     return () => {
       unsubEvents();
       unsubAttendances();
@@ -545,6 +665,7 @@ export default function AdminConsole({
       unsubRecCategories();
       unsubRecTemplate();
       unsubCertificates();
+      unsubVoiceSettings();
       if (bgOpacitySaveTimerRef.current !== null) {
         window.clearTimeout(bgOpacitySaveTimerRef.current);
       }
@@ -1457,6 +1578,19 @@ export default function AdminConsole({
           <Award className="w-4 h-4" />
           <span>Certificates &amp; Recognition ({issuedCertificates.length})</span>
         </button>
+
+        <button
+          type="button"
+          onClick={() => setCurrentSection('voice')}
+          className={`min-h-[42px] px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-colors inline-flex items-center gap-2 ${
+            currentSection === 'voice'
+              ? 'bg-emerald-700 text-white'
+              : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+          }`}
+        >
+          <Volume2 className="w-4 h-4" />
+          <span>Voice Announcement Settings</span>
+        </button>
       </nav>
 
       {currentSection === 'feedback' && (
@@ -1484,6 +1618,10 @@ export default function AdminConsole({
           templateConfig={recognitionTemplate}
           certificates={issuedCertificates}
         />
+      )}
+
+      {currentSection === 'voice' && (
+        <AdminVoiceSettingsModule user={user} savedSettings={voiceSettings} />
       )}
 
       {currentSection === 'attendance' && (
@@ -1861,6 +1999,49 @@ export default function AdminConsole({
                 <span className="text-xs font-mono-tabular font-semibold text-slate-700 mr-1">
                   {attendances.length} total
                 </span>
+                {voiceSettings.enabled && voiceSettings.announceOnDashboard && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      unlockBrowserAudio();
+                      setDashboardVoiceMuted((m) => !m);
+                    }}
+                    className={`min-h-[34px] px-2.5 py-1 rounded-lg border text-xs font-semibold transition-colors inline-flex items-center gap-1.5 whitespace-nowrap ${
+                      dashboardVoiceMuted
+                        ? 'border-slate-300 bg-slate-100 text-slate-600'
+                        : speakingParticipantName
+                        ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                        : 'border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-100'
+                    }`}
+                    title="Mute or unmute live dashboard voice announcements"
+                  >
+                    {dashboardVoiceMuted ? (
+                      <>
+                        <VolumeX className="w-3.5 h-3.5" />
+                        <span>Voice Muted</span>
+                      </>
+                    ) : speakingParticipantName ? (
+                      <>
+                        <Volume2 className="w-3.5 h-3.5 animate-pulse" />
+                        <span className="max-w-[140px] truncate">
+                          Speaking: {speakingParticipantName}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <Volume2 className="w-3.5 h-3.5" />
+                        <span>AI Voice On</span>
+                      </>
+                    )}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setCurrentSection('voice')}
+                  className="min-h-[34px] px-2.5 py-1 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-xs font-semibold text-slate-700 transition-colors whitespace-nowrap"
+                >
+                  Voice Settings
+                </button>
                 <button
                   type="button"
                   disabled={savingBg}
@@ -1906,6 +2087,25 @@ export default function AdminConsole({
                 )}
               </div>
             </div>
+
+            {dashboardAutoplayBlocked && !dashboardVoiceMuted && (
+              <div className="px-5 py-2.5 bg-amber-50 border-b border-amber-200 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-900">
+                <span>
+                  Browser blocked automatic audio playback. Click once to allow live check-in announcements.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    unlockBrowserAudio();
+                    setDashboardAutoplayBlocked(false);
+                    announcementQueueRef.current?.replayBlocked();
+                  }}
+                  className="px-3 py-1 rounded-lg bg-amber-900 hover:bg-amber-800 text-white font-semibold"
+                >
+                  Enable Dashboard Audio
+                </button>
+              </div>
+            )}
 
             {bgError && (
               <div className="px-5 py-2 text-xs text-rose-700 bg-rose-50 border-b border-rose-200">

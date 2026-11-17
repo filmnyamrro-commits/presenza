@@ -11,6 +11,7 @@ import {
   RefreshCw,
   ShieldCheck,
   UserCheck,
+  Volume2,
   AlertCircle,
 } from 'lucide-react';
 import { signInWithPopup, signOut, type User } from 'firebase/auth';
@@ -38,6 +39,7 @@ import {
   type CheckInReceipt,
   type EventRecord,
   OperationType,
+  type VoiceAnnouncementSettings,
 } from '../types';
 import {
   buildCutoffDate,
@@ -47,6 +49,14 @@ import {
   generateSafeId,
 } from '../utils/dateTime';
 import { captureVideoFrame, compressImageFile } from '../utils/imageCompress';
+import {
+  DEFAULT_VOICE_SETTINGS,
+  formatAnnouncementMessage,
+  mergeVoiceSettings,
+  speakAnnouncement,
+  stopAllAnnouncements,
+  unlockBrowserAudio,
+} from '../utils/voiceAnnouncement';
 
 interface ParticipantCheckInProps {
   requestedEventId: string | null;
@@ -93,9 +103,39 @@ export default function ParticipantCheckIn({
   const [formError, setFormError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<CheckInReceipt | null>(null);
 
+  // Voice announcement settings
+  const [voiceSettings, setVoiceSettings] =
+    useState<VoiceAnnouncementSettings>(DEFAULT_VOICE_SETTINGS);
+  const [speakingReceipt, setSpeakingReceipt] = useState(false);
+
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const nativeCameraInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Load saved Voice Announcement Settings
+  useEffect(() => {
+    const unsubVoice = onSnapshot(
+      doc(db, 'voiceSettings', 'default'),
+      (snap) => {
+        if (snap.exists()) {
+          setVoiceSettings(
+            mergeVoiceSettings(
+              snap.data() as Partial<VoiceAnnouncementSettings>
+            )
+          );
+        } else {
+          setVoiceSettings(DEFAULT_VOICE_SETTINGS);
+        }
+      },
+      () => {
+        setVoiceSettings(DEFAULT_VOICE_SETTINGS);
+      }
+    );
+    return () => {
+      unsubVoice();
+      stopAllAnnouncements();
+    };
+  }, []);
 
   // Live 1-second clock tick for accurate check-in time display
   useEffect(() => {
@@ -462,6 +502,21 @@ export default function ParticipantCheckIn({
             ? participantVerifiedEmail
             : undefined,
       });
+
+      if (voiceSettings.enabled && voiceSettings.announceOnCheckIn) {
+        unlockBrowserAudio();
+        const announcementText = formatAnnouncementMessage(voiceSettings, {
+          name: cleanName,
+          department: cleanDept,
+          eventTitle: selectedEvent.title,
+        });
+        if (announcementText) {
+          setSpeakingReceipt(true);
+          void speakAnnouncement(announcementText, voiceSettings).finally(() => {
+            setSpeakingReceipt(false);
+          });
+        }
+      }
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       if (msg.toLowerCase().includes('permission')) {
@@ -617,6 +672,32 @@ export default function ParticipantCheckIn({
                 : 'No account or email required. You may close this page now.'}
             </span>
             <div className="w-full sm:w-auto flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+              {voiceSettings.enabled && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    unlockBrowserAudio();
+                    const text = formatAnnouncementMessage(voiceSettings, {
+                      name: receipt.fullName,
+                      department: receipt.classDepartment,
+                      eventTitle: receipt.eventName,
+                    });
+                    if (text) {
+                      setSpeakingReceipt(true);
+                      void speakAnnouncement(text, voiceSettings).finally(() => {
+                        setSpeakingReceipt(false);
+                      });
+                    }
+                  }}
+                  disabled={speakingReceipt}
+                  className="min-h-[44px] px-4 py-2.5 rounded-xl border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-800 text-sm font-semibold transition-colors flex items-center justify-center gap-2 whitespace-nowrap disabled:opacity-70"
+                >
+                  <Volume2 className="w-4 h-4" />
+                  <span>
+                    {speakingReceipt ? 'Announcing...' : 'Replay Welcome Voice'}
+                  </span>
+                </button>
+              )}
               {onGoToFeedback && (
                 <button
                   type="button"

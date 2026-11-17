@@ -250,6 +250,32 @@ export interface IssuedCertificateRecord {
   createdAt: Timestamp;
 }
 
+// Module 3: AI Voice Check-in Announcement
+export type VoiceLanguage = 'en-US' | 'id-ID';
+export type VoiceEngineMode = 'auto' | 'ai' | 'browser';
+export type VoicePresetId =
+  | 'en-prof-male'
+  | 'en-friendly-male'
+  | 'en-prof-female'
+  | 'en-friendly-female'
+  | 'id-male'
+  | 'id-female'
+  | 'browser-custom';
+
+export interface VoiceAnnouncementSettings {
+  enabled: boolean;
+  engineMode: VoiceEngineMode;
+  voiceId: VoicePresetId;
+  browserVoiceUri: string;
+  language: VoiceLanguage;
+  speakingRate: number;
+  volume: number;
+  englishTemplate: string;
+  indonesianTemplate: string;
+  announceOnDashboard: boolean;
+  announceOnCheckIn: boolean;
+}
+
 export enum OperationType {
   CREATE = 'create',
   UPDATE = 'update',

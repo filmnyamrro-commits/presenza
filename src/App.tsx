@@ -24,6 +24,7 @@ function readInitialEventId(): string | null {
 function readAdminSectionFromLocation(): AdminSectionTab {
   if (window.location.hash === '#admin/feedback') return 'feedback';
   if (window.location.hash === '#admin/certificates') return 'certificates';
+  if (window.location.hash === '#admin/voice') return 'voice';
   return 'attendance';
 }
 
@@ -131,6 +132,8 @@ export default function App() {
           ? '#admin/feedback'
           : targetSec === 'certificates'
           ? '#admin/certificates'
+          : targetSec === 'voice'
+          ? '#admin/voice'
           : '#admin';
       window.history.replaceState(null, '', `/${hash}`);
     } else if (nextView === 'feedback') {
@@ -388,6 +391,8 @@ export default function App() {
                     ? '#admin/feedback'
                     : sec === 'certificates'
                     ? '#admin/certificates'
+                    : sec === 'voice'
+                    ? '#admin/voice'
                     : '#admin';
                 window.history.replaceState(null, '', `/${hash}`);
               }}

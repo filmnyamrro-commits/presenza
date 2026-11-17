@@ -385,6 +385,39 @@ service cloud.firestore {
         data.createdAt is timestamp;
     }
 
+    function isValidVoiceSetting(data) {
+      return data.keys().hasAll([
+          'enabled', 'engineMode', 'voiceId', 'browserVoiceUri',
+          'language', 'speakingRate', 'volume',
+          'englishTemplate', 'indonesianTemplate',
+          'announceOnDashboard', 'announceOnCheckIn',
+          'updatedByUid', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'enabled', 'engineMode', 'voiceId', 'browserVoiceUri',
+          'language', 'speakingRate', 'volume',
+          'englishTemplate', 'indonesianTemplate',
+          'announceOnDashboard', 'announceOnCheckIn',
+          'updatedByUid', 'updatedAt'
+        ]) &&
+        data.enabled is bool &&
+        data.engineMode in ['auto', 'ai', 'browser'] &&
+        data.voiceId in [
+          'en-prof-male', 'en-friendly-male', 'en-prof-female',
+          'en-friendly-female', 'id-male', 'id-female', 'browser-custom'
+        ] &&
+        data.browserVoiceUri is string && data.browserVoiceUri.size() <= 200 &&
+        data.language in ['en-US', 'id-ID'] &&
+        data.speakingRate is number && data.speakingRate >= 0.6 && data.speakingRate <= 1.5 &&
+        data.volume is number && data.volume >= 0 && data.volume <= 1 &&
+        data.englishTemplate is string && data.englishTemplate.size() >= 2 && data.englishTemplate.size() <= 300 &&
+        data.indonesianTemplate is string && data.indonesianTemplate.size() >= 2 && data.indonesianTemplate.size() <= 300 &&
+        data.announceOnDashboard is bool &&
+        data.announceOnCheckIn is bool &&
+        isValidId(data.updatedByUid) &&
+        data.updatedAt is timestamp;
+    }
+
     match /events/{eventId} {
       allow get: if isValidId(eventId) && (existing().status == 'active' || isAdmin());
       allow list: if existing().status == 'active' || isAdmin();
@@ -623,6 +656,29 @@ service cloud.firestore {
         incoming().createdAt == request.time;
       allow update: if false;
       allow delete: if isAdmin() && isValidId(certificateId);
+    }
+
+    match /voiceSettings/{settingId} {
+      allow get: if isValidId(settingId);
+      allow list: if isAdmin();
+      allow create: if isAdmin() &&
+        isValidId(settingId) &&
+        isValidVoiceSetting(incoming()) &&
+        incoming().updatedByUid == request.auth.uid &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() &&
+        isValidId(settingId) &&
+        isValidVoiceSetting(incoming()) &&
+        incoming().updatedByUid == request.auth.uid &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'enabled', 'engineMode', 'voiceId', 'browserVoiceUri',
+          'language', 'speakingRate', 'volume',
+          'englishTemplate', 'indonesianTemplate',
+          'announceOnDashboard', 'announceOnCheckIn',
+          'updatedByUid', 'updatedAt'
+        ]);
+      allow delete: if isAdmin() && isValidId(settingId);
     }
   }
 }
