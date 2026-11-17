@@ -13,6 +13,7 @@
 10. **Recognition Certificates & Duplicate Prevention**: Only verified admins may manage `/recognitionCategories`, `/recognitionTemplates`, and `/certificates`. Generated certificates use deterministic document IDs keyed by `(eventId, categoryId, participant)` with `allow update: if false` to prevent duplicate issuance.
 11. **Voice Announcement Settings Protection**: `/voiceSettings/{settingId}` stores non-PII voice announcement configuration (`enabled`, `engineMode`, `voiceId`, `language`, `speakingRate`, `volume`, templates). Clients may `get` `voiceSettings/default` for check-in receipt announcements, while `list`, `create`, `update`, and `delete` are strictly restricted to verified admins (`isAdmin()`).
 12. **Admin-Only Live Board Settings**: `/liveBoardSettings/{settingId}` stores administrator animation, sizing, pagination, and projector display configuration; all `get`, `list`, `create`, `update`, and `delete` operations are strictly restricted to verified admins (`isAdmin()`).
+13. **Primary Owner Device Control**: `/authorizedDevices/{deviceId}` stores cross-device authorization and revocation records; all `get`, `list`, `create`, `update`, and `delete` operations are strictly restricted to the verified Primary Owner (`rohantmr.lover@gmail.com`). Verification codes are generated, hashed, rate-limited, and verified exclusively server-side.
 
 ## 2. Dirty Dozen Adversarial Payloads
 1. Unauthenticated read/list on `/attendances` -> PERMISSION_DENIED
@@ -37,3 +38,4 @@
 20. Non-admin creating or deleting `/recognitionCategories` or `/certificates` -> PERMISSION_DENIED
 21. Non-admin modifying `/voiceSettings/default` or submitting out-of-range `speakingRate`/`volume` -> PERMISSION_DENIED
 22. Non-admin reading/writing `/liveBoardSettings/default` or supplying invalid `animationDurationMs`/`manualColumns` -> PERMISSION_DENIED
+23. Any non-owner (even a co-admin) reading, creating, revoking, or deleting `/authorizedDevices/{deviceId}` -> PERMISSION_DENIED

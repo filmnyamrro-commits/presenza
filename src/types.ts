@@ -317,6 +317,34 @@ export interface LiveBoardSettings {
   disableAnimations: boolean;
 }
 
+// Module 5: Cross-Device Owner Verification & Device Authorization
+export interface AuthorizedDeviceRecord {
+  deviceId: string;
+  deviceName: string;
+  userAgentSummary: string;
+  status: 'active' | 'revoked';
+  authorizedBy: 'code' | 'owner-google' | 'owner-direct';
+  authorizedAtIso: string;
+  lastSeenAtIso: string;
+  revokedAtIso?: string;
+}
+
+export interface PendingDeviceChallengeSummary {
+  challengeId: string;
+  deviceId: string;
+  deviceName: string;
+  userAgentSummary: string;
+  expiresAtIso: string;
+  createdAtIso: string;
+  attempts: number;
+  maxAttempts: number;
+  emailSent: boolean;
+}
+
+export interface DeviceSecurityPolicy {
+  allowDirectQrWithoutDeviceAuth: boolean;
+}
+
 export enum OperationType {
   CREATE = 'create',
   UPDATE = 'update',

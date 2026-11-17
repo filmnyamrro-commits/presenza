@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GoogleGenAI } from '@google/genai';
+import { registerDeviceAuthRoutes } from './server/deviceAuth.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -72,6 +73,8 @@ async function startServer() {
       ttsAvailable: Boolean(apiKey && apiKey !== 'MY_GEMINI_API_KEY'),
     });
   });
+
+  registerDeviceAuthRoutes(app);
 
   app.post('/api/tts', async (req, res) => {
     const body = (req.body ?? {}) as {

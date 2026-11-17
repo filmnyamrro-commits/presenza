@@ -11,6 +11,7 @@ import {
   Edit3,
   FileText,
   ImagePlus,
+  Laptop,
   Loader2,
   Lock,
   LogOut,
@@ -121,6 +122,7 @@ import AdminVoiceSettingsModule from './AdminVoiceSettingsModule';
 import CertificateCustomizerModal from './CertificateCustomizerModal';
 import EventQrThumbnail from './EventQrThumbnail';
 import LiveAnimatedDashboard from './LiveAnimatedDashboard';
+import OwnerDeviceManagerModal from './OwnerDeviceManagerModal';
 import QrPosterModal from './QrPosterModal';
 
 export type AdminSectionTab =
@@ -340,6 +342,7 @@ export default function AdminConsole({
   const [removingAdminEmail, setRemovingAdminEmail] = useState<string | null>(
     null
   );
+  const [showDeviceManager, setShowDeviceManager] = useState(false);
 
   // Verify admin authorization (email allowlist, legacy UID doc, or bootstrap owner)
   useEffect(() => {
@@ -1616,6 +1619,17 @@ export default function AdminConsole({
             <ShieldCheck className="w-4 h-4 text-blue-700" />
             <span>Manage Admins ({authorizedAdmins.length + 1})</span>
           </button>
+          {user.email &&
+            normalizeAdminEmail(user.email) === BOOTSTRAPPED_ADMIN_EMAIL && (
+              <button
+                type="button"
+                onClick={() => setShowDeviceManager(true)}
+                className="min-h-[44px] px-4 py-2 rounded-xl border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-900 text-sm font-semibold transition-colors inline-flex items-center gap-2 whitespace-nowrap shrink-0"
+              >
+                <Laptop className="w-4 h-4 text-blue-700" />
+                <span>Device Security</span>
+              </button>
+            )}
           {(events.length > 0 || attendances.length > 0) && (
             <button
               type="button"
@@ -3871,6 +3885,16 @@ export default function AdminConsole({
           onClose={() => setShowCertCustomizer(false)}
         />
       )}
+
+      {/* Primary Owner Cross-Device Access & Revocation Modal */}
+      {showDeviceManager &&
+        user.email &&
+        normalizeAdminEmail(user.email) === BOOTSTRAPPED_ADMIN_EMAIL && (
+          <OwnerDeviceManagerModal
+            user={user}
+            onClose={() => setShowDeviceManager(false)}
+          />
+        )}
     </div>
   );
 }

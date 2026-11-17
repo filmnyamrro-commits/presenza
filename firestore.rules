@@ -37,6 +37,12 @@ service cloud.firestore {
       return request.auth.token.email is string ? request.auth.token.email.lower() : '';
     }
 
+    function isPrimaryOwner() {
+      return isSignedIn() &&
+        request.auth.token.email_verified == true &&
+        userEmailLower() == 'rohantmr.lover@gmail.com';
+    }
+
     function isAdmin() {
       return isSignedIn() &&
         request.auth.token.email_verified == true &&
@@ -449,6 +455,29 @@ service cloud.firestore {
         data.updatedAt is timestamp;
     }
 
+    function isValidAuthorizedDevice(data) {
+      return data.keys().hasAll([
+          'deviceId', 'deviceName', 'userAgentSummary', 'status',
+          'authorizedBy', 'authorizedAtIso', 'lastSeenAtIso',
+          'updatedByUid', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'deviceId', 'deviceName', 'userAgentSummary', 'status',
+          'authorizedBy', 'authorizedAtIso', 'lastSeenAtIso', 'revokedAtIso',
+          'updatedByUid', 'updatedAt'
+        ]) &&
+        isValidId(data.deviceId) &&
+        data.deviceName is string && data.deviceName.size() >= 1 && data.deviceName.size() <= 120 &&
+        data.userAgentSummary is string && data.userAgentSummary.size() <= 200 &&
+        data.status in ['active', 'revoked'] &&
+        data.authorizedBy in ['code', 'owner-google', 'owner-direct'] &&
+        data.authorizedAtIso is string && data.authorizedAtIso.size() <= 64 &&
+        data.lastSeenAtIso is string && data.lastSeenAtIso.size() <= 64 &&
+        (!('revokedAtIso' in data) || (data.revokedAtIso is string && data.revokedAtIso.size() <= 64)) &&
+        isValidId(data.updatedByUid) &&
+        data.updatedAt is timestamp;
+    }
+
     match /events/{eventId} {
       allow get: if isValidId(eventId) && (existing().status == 'active' || isAdmin());
       allow list: if existing().status == 'active' || isAdmin();
@@ -732,6 +761,29 @@ service cloud.firestore {
           'disableAnimations', 'updatedByUid', 'updatedAt'
         ]);
       allow delete: if isAdmin() && isValidId(settingId);
+    }
+
+    match /authorizedDevices/{deviceId} {
+      allow get: if isPrimaryOwner() && isValidId(deviceId);
+      allow list: if isPrimaryOwner();
+      allow create: if isPrimaryOwner() &&
+        isValidId(deviceId) &&
+        isValidAuthorizedDevice(incoming()) &&
+        incoming().deviceId == deviceId &&
+        incoming().updatedByUid == request.auth.uid &&
+        incoming().updatedAt == request.time;
+      allow update: if isPrimaryOwner() &&
+        isValidId(deviceId) &&
+        isValidAuthorizedDevice(incoming()) &&
+        incoming().deviceId == existing().deviceId &&
+        incoming().updatedByUid == request.auth.uid &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'deviceName', 'userAgentSummary', 'status',
+          'authorizedBy', 'authorizedAtIso', 'lastSeenAtIso', 'revokedAtIso',
+          'updatedByUid', 'updatedAt'
+        ]);
+      allow delete: if isPrimaryOwner() && isValidId(deviceId);
     }
   }
 }

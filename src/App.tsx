@@ -7,6 +7,7 @@ import { onAuthStateChanged, type User } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import AdminConsole, { type AdminSectionTab } from './components/AdminConsole';
+import DeviceAuthGate from './components/DeviceAuthGate';
 import ErrorBoundary from './components/ErrorBoundary';
 import ParticipantCheckIn from './components/ParticipantCheckIn';
 import ParticipantFeedback from './components/ParticipantFeedback';
@@ -174,7 +175,11 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
+      <DeviceAuthGate
+        branding={branding}
+        isDirectQrLink={isQrParticipantView}
+      >
+        <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
         {/* Top Bar */}
         <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
@@ -417,7 +422,8 @@ export default function App() {
             </span>
           </div>
         </footer>
-      </div>
+        </div>
+      </DeviceAuthGate>
     </ErrorBoundary>
   );
 }

@@ -757,6 +757,47 @@
         "updatedByUid",
         "updatedAt"
       ]
+    },
+    "AuthorizedDevice": {
+      "title": "AuthorizedDevice",
+      "description": "Device authorization audit and revocation record managed exclusively by the primary owner.",
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "deviceName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "userAgentSummary": { "type": "string", "maxLength": 200 },
+        "status": { "type": "string", "enum": ["active", "revoked"] },
+        "authorizedBy": {
+          "type": "string",
+          "enum": ["code", "owner-google", "owner-direct"]
+        },
+        "authorizedAtIso": { "type": "string", "maxLength": 64 },
+        "lastSeenAtIso": { "type": "string", "maxLength": 64 },
+        "revokedAtIso": { "type": "string", "maxLength": 64 },
+        "updatedByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "deviceId",
+        "deviceName",
+        "userAgentSummary",
+        "status",
+        "authorizedBy",
+        "authorizedAtIso",
+        "lastSeenAtIso",
+        "updatedByUid",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -815,6 +856,10 @@
     "/liveBoardSettings/{settingId}": {
       "schema": { "$ref": "#/entities/LiveBoardSetting" },
       "description": "Live Animated Attendance Dashboard layout, theme, pagination, and animation configuration managed by administrators."
+    },
+    "/authorizedDevices/{deviceId}": {
+      "schema": { "$ref": "#/entities/AuthorizedDevice" },
+      "description": "Cross-device authorization & revocation audit records controlled solely by the primary owner."
     }
   }
 }
