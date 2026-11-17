@@ -276,6 +276,47 @@ export interface VoiceAnnouncementSettings {
   announceOnCheckIn: boolean;
 }
 
+// Module 4: Live Animated Attendance Dashboard
+export type LiveBoardAnimationStyle =
+  | 'zoom-bounce'
+  | 'slide-up'
+  | 'slide-side'
+  | 'fade-scale';
+
+export type LiveBoardCardLayout =
+  | 'portrait-card'
+  | 'horizontal-tile'
+  | 'compact-badge';
+
+export type LiveBoardSizeScale = 'auto' | 'sm' | 'md' | 'lg' | 'xl';
+
+export type LiveBoardThemeId =
+  | 'clean-light'
+  | 'slate-conference'
+  | 'midnight-projector'
+  | 'emerald-hall'
+  | 'warm-ivory';
+
+export type LiveBoardDisplayMode =
+  | 'fit'
+  | 'auto-paginate'
+  | 'rotating'
+  | 'manual';
+
+export interface LiveBoardSettings {
+  animationStyle: LiveBoardAnimationStyle;
+  animationDurationMs: number;
+  cardLayout: LiveBoardCardLayout;
+  columnsMode: 'auto' | 'manual';
+  manualColumns: number;
+  photoSize: LiveBoardSizeScale;
+  fontSize: LiveBoardSizeScale;
+  backgroundTheme: LiveBoardThemeId;
+  displayMode: LiveBoardDisplayMode;
+  rotationIntervalSec: number;
+  disableAnimations: boolean;
+}
+
 export enum OperationType {
   CREATE = 'create',
   UPDATE = 'update',

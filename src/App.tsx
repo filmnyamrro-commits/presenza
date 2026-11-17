@@ -22,6 +22,7 @@ function readInitialEventId(): string | null {
 }
 
 function readAdminSectionFromLocation(): AdminSectionTab {
+  if (window.location.hash === '#admin/live-board') return 'live-board';
   if (window.location.hash === '#admin/feedback') return 'feedback';
   if (window.location.hash === '#admin/certificates') return 'certificates';
   if (window.location.hash === '#admin/voice') return 'voice';
@@ -128,7 +129,9 @@ export default function App() {
       const targetSec = nextAdminSection ?? adminSection;
       setAdminSection(targetSec);
       const hash =
-        targetSec === 'feedback'
+        targetSec === 'live-board'
+          ? '#admin/live-board'
+          : targetSec === 'feedback'
           ? '#admin/feedback'
           : targetSec === 'certificates'
           ? '#admin/certificates'
@@ -387,7 +390,9 @@ export default function App() {
               onChangeSection={(sec) => {
                 setAdminSection(sec);
                 const hash =
-                  sec === 'feedback'
+                  sec === 'live-board'
+                    ? '#admin/live-board'
+                    : sec === 'feedback'
                     ? '#admin/feedback'
                     : sec === 'certificates'
                     ? '#admin/certificates'

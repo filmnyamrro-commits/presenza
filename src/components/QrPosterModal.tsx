@@ -9,6 +9,7 @@ import {
   Loader2,
   Maximize2,
   Minimize2,
+  MonitorPlay,
   Printer,
   Users,
   X,
@@ -24,6 +25,7 @@ interface QrPosterModalProps {
   onClose: () => void;
   onOpenCheckIn: (eventId: string) => void;
   onOpenFeedback?: (eventId: string) => void;
+  onLaunchProjector?: (eventId: string) => void;
   onPreviewPhoto: (record: AttendanceRecord) => void;
   dashboardBgUrl?: string | null;
   dashboardBgOpacity?: number;
@@ -41,6 +43,7 @@ export default function QrPosterModal({
   onClose,
   onOpenCheckIn,
   onOpenFeedback,
+  onLaunchProjector,
   onPreviewPhoto,
   dashboardBgUrl,
   dashboardBgOpacity = 25,
@@ -162,6 +165,19 @@ export default function QrPosterModal({
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
+            {onLaunchProjector && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onLaunchProjector(event.id);
+                }}
+                className="min-h-[40px] px-3 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-xs font-semibold text-white transition-colors inline-flex items-center gap-1.5 whitespace-nowrap"
+              >
+                <MonitorPlay className="w-4 h-4" />
+                <span>Animated Projector</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setExpanded((prev) => !prev)}
@@ -176,7 +192,7 @@ export default function QrPosterModal({
               ) : (
                 <>
                   <Maximize2 className="w-4 h-4" />
-                  <span>Projector View</span>
+                  <span>Expand</span>
                 </>
               )}
             </button>

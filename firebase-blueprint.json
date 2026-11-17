@@ -699,6 +699,64 @@
         "updatedByUid",
         "updatedAt"
       ]
+    },
+    "LiveBoardSetting": {
+      "title": "LiveBoardSetting",
+      "description": "Administrator configuration for the Live Animated Attendance Dashboard (animations, grid layout, adaptive sizing, pagination/rotation, themes, and reduced-motion option).",
+      "type": "object",
+      "properties": {
+        "animationStyle": {
+          "type": "string",
+          "enum": ["zoom-bounce", "slide-up", "slide-side", "fade-scale"]
+        },
+        "animationDurationMs": { "type": "number", "minimum": 250, "maximum": 1500 },
+        "cardLayout": {
+          "type": "string",
+          "enum": ["portrait-card", "horizontal-tile", "compact-badge"]
+        },
+        "columnsMode": { "type": "string", "enum": ["auto", "manual"] },
+        "manualColumns": { "type": "number", "minimum": 1, "maximum": 10 },
+        "photoSize": { "type": "string", "enum": ["auto", "sm", "md", "lg", "xl"] },
+        "fontSize": { "type": "string", "enum": ["auto", "sm", "md", "lg", "xl"] },
+        "backgroundTheme": {
+          "type": "string",
+          "enum": [
+            "clean-light",
+            "slate-conference",
+            "midnight-projector",
+            "emerald-hall",
+            "warm-ivory"
+          ]
+        },
+        "displayMode": {
+          "type": "string",
+          "enum": ["fit", "auto-paginate", "rotating", "manual"]
+        },
+        "rotationIntervalSec": { "type": "number", "minimum": 4, "maximum": 60 },
+        "disableAnimations": { "type": "boolean" },
+        "updatedByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "animationStyle",
+        "animationDurationMs",
+        "cardLayout",
+        "columnsMode",
+        "manualColumns",
+        "photoSize",
+        "fontSize",
+        "backgroundTheme",
+        "displayMode",
+        "rotationIntervalSec",
+        "disableAnimations",
+        "updatedByUid",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -753,6 +811,10 @@
     "/voiceSettings/{settingId}": {
       "schema": { "$ref": "#/entities/VoiceSetting" },
       "description": "AI Voice Check-In Announcement settings configured by administrators."
+    },
+    "/liveBoardSettings/{settingId}": {
+      "schema": { "$ref": "#/entities/LiveBoardSetting" },
+      "description": "Live Animated Attendance Dashboard layout, theme, pagination, and animation configuration managed by administrators."
     }
   }
 }

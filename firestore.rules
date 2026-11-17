@@ -418,6 +418,37 @@ service cloud.firestore {
         data.updatedAt is timestamp;
     }
 
+    function isValidLiveBoardSetting(data) {
+      return data.keys().hasAll([
+          'animationStyle', 'animationDurationMs', 'cardLayout',
+          'columnsMode', 'manualColumns', 'photoSize', 'fontSize',
+          'backgroundTheme', 'displayMode', 'rotationIntervalSec',
+          'disableAnimations', 'updatedByUid', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'animationStyle', 'animationDurationMs', 'cardLayout',
+          'columnsMode', 'manualColumns', 'photoSize', 'fontSize',
+          'backgroundTheme', 'displayMode', 'rotationIntervalSec',
+          'disableAnimations', 'updatedByUid', 'updatedAt'
+        ]) &&
+        data.animationStyle in ['zoom-bounce', 'slide-up', 'slide-side', 'fade-scale'] &&
+        data.animationDurationMs is number && data.animationDurationMs >= 250 && data.animationDurationMs <= 1500 &&
+        data.cardLayout in ['portrait-card', 'horizontal-tile', 'compact-badge'] &&
+        data.columnsMode in ['auto', 'manual'] &&
+        data.manualColumns is number && data.manualColumns >= 1 && data.manualColumns <= 10 &&
+        data.photoSize in ['auto', 'sm', 'md', 'lg', 'xl'] &&
+        data.fontSize in ['auto', 'sm', 'md', 'lg', 'xl'] &&
+        data.backgroundTheme in [
+          'clean-light', 'slate-conference', 'midnight-projector',
+          'emerald-hall', 'warm-ivory'
+        ] &&
+        data.displayMode in ['fit', 'auto-paginate', 'rotating', 'manual'] &&
+        data.rotationIntervalSec is number && data.rotationIntervalSec >= 4 && data.rotationIntervalSec <= 60 &&
+        data.disableAnimations is bool &&
+        isValidId(data.updatedByUid) &&
+        data.updatedAt is timestamp;
+    }
+
     match /events/{eventId} {
       allow get: if isValidId(eventId) && (existing().status == 'active' || isAdmin());
       allow list: if existing().status == 'active' || isAdmin();
@@ -677,6 +708,28 @@ service cloud.firestore {
           'englishTemplate', 'indonesianTemplate',
           'announceOnDashboard', 'announceOnCheckIn',
           'updatedByUid', 'updatedAt'
+        ]);
+      allow delete: if isAdmin() && isValidId(settingId);
+    }
+
+    match /liveBoardSettings/{settingId} {
+      allow get: if isAdmin() && isValidId(settingId);
+      allow list: if isAdmin();
+      allow create: if isAdmin() &&
+        isValidId(settingId) &&
+        isValidLiveBoardSetting(incoming()) &&
+        incoming().updatedByUid == request.auth.uid &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() &&
+        isValidId(settingId) &&
+        isValidLiveBoardSetting(incoming()) &&
+        incoming().updatedByUid == request.auth.uid &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'animationStyle', 'animationDurationMs', 'cardLayout',
+          'columnsMode', 'manualColumns', 'photoSize', 'fontSize',
+          'backgroundTheme', 'displayMode', 'rotationIntervalSec',
+          'disableAnimations', 'updatedByUid', 'updatedAt'
         ]);
       allow delete: if isAdmin() && isValidId(settingId);
     }
