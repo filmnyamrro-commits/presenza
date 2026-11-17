@@ -219,6 +219,7 @@ export default function App() {
           {view === 'checkin' ? (
             <ParticipantCheckIn
               requestedEventId={requestedEventId}
+              user={user}
               onSelectEventId={handleSelectEventId}
               onGoToAdmin={
                 isQrParticipantView ? undefined : () => navigateToView('admin')
@@ -240,7 +241,7 @@ export default function App() {
               {orgName ? `${orgName} · ` : ''}PRESENZA · Workshops, Seminars &amp; Professional Development
             </span>
             <span>
-              Participants check in via QR without registration or login
+              QR attendance check-in (email login optional per session)
             </span>
           </div>
         </footer>

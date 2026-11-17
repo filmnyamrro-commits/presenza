@@ -13,6 +13,7 @@ export function exportAttendanceCsv(
   const headers = [
     'Full Name',
     'Class / Department',
+    'Participant Email',
     'Event Name',
     'Attendance Date',
     'Check-In Time',
@@ -29,6 +30,7 @@ export function exportAttendanceCsv(
     return [
       escapeCsvCell(record.fullName),
       escapeCsvCell(record.classDepartment),
+      escapeCsvCell(record.participantEmail || ''),
       escapeCsvCell(record.eventName),
       escapeCsvCell(record.attendanceDate),
       escapeCsvCell(record.checkInTime),

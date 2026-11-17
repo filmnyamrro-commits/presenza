@@ -25,6 +25,7 @@ export interface EventRecord {
   consentText?: string;
   facilitators?: string;
   principalName?: string;
+  requireParticipantLogin?: boolean;
 }
 
 export interface AttendanceRecord {
@@ -40,6 +41,8 @@ export interface AttendanceRecord {
   serverTimestamp: Timestamp;
   status: AttendanceStatus;
   lateExcuse: string;
+  participantEmail?: string;
+  participantUid?: string;
 }
 
 export interface CheckInReceipt {
@@ -54,11 +57,21 @@ export interface CheckInReceipt {
   recordedAtIso: string;
   status: AttendanceStatus;
   lateExcuse: string;
+  participantEmail?: string;
 }
 
 export interface OrganizationBranding {
   organizationName: string;
   logoDataUrl: string;
+}
+
+export interface AuthorizedAdminRecord {
+  id: string;
+  email: string;
+  displayName: string;
+  addedByUid: string;
+  addedByEmail: string;
+  createdAt: Timestamp;
 }
 
 export enum OperationType {

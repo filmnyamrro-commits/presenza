@@ -4,12 +4,15 @@ import {
   Clock,
   FlipHorizontal2,
   Loader2,
+  LogOut,
+  Mail,
   MapPin,
   RefreshCw,
   ShieldCheck,
   UserCheck,
   AlertCircle,
 } from 'lucide-react';
+import { signInWithPopup, signOut, type User } from 'firebase/auth';
 import {
   collection,
   doc,
@@ -21,7 +24,15 @@ import {
   where,
 } from 'firebase/firestore';
 import { useEffect, useRef, useState } from 'react';
-import { db, handleFirestoreError } from '../firebase';
+import {
+  auth,
+  type AuthErrorDetails,
+  db,
+  formatFirebaseAuthError,
+  googleProvider,
+  handleFirestoreError,
+  normalizeAdminEmail,
+} from '../firebase';
 import {
   type CheckInReceipt,
   type EventRecord,
@@ -38,12 +49,14 @@ import { captureVideoFrame, compressImageFile } from '../utils/imageCompress';
 
 interface ParticipantCheckInProps {
   requestedEventId: string | null;
+  user?: User | null;
   onSelectEventId: (eventId: string | null) => void;
   onGoToAdmin?: () => void;
 }
 
 export default function ParticipantCheckIn({
   requestedEventId,
+  user = null,
   onSelectEventId,
   onGoToAdmin,
 }: ParticipantCheckInProps) {
@@ -54,12 +67,17 @@ export default function ParticipantCheckIn({
 
   const [now, setNow] = useState<Date>(() => new Date());
 
-  // Form fields (zero login / zero email / zero password)
+  // Form fields
   const [fullName, setFullName] = useState('');
   const [classDepartment, setClassDepartment] = useState('');
   const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null);
   const [photoConsent, setPhotoConsent] = useState(false);
   const [lateExcuse, setLateExcuse] = useState('');
+
+  // Optional participant Google sign-in state (when event requires email login)
+  const [signingInParticipant, setSigningInParticipant] = useState(false);
+  const [participantAuthError, setParticipantAuthError] =
+    useState<AuthErrorDetails | null>(null);
 
   // Camera state
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -283,6 +301,46 @@ export default function ParticipantCheckIn({
   const liveDateStr = formatLocalDateYmd(now);
   const liveTimeStr = formatClockTime(now);
 
+  const requiresParticipantLogin = Boolean(selectedEvent?.requireParticipantLogin);
+  const participantVerifiedEmail =
+    user && user.email && user.emailVerified
+      ? normalizeAdminEmail(user.email)
+      : '';
+
+  useEffect(() => {
+    if (
+      requiresParticipantLogin &&
+      user?.displayName &&
+      !fullName.trim()
+    ) {
+      setFullName(user.displayName.trim().slice(0, 100));
+    }
+  }, [requiresParticipantLogin, user?.displayName, fullName]);
+
+  const handleParticipantGoogleSignIn = async () => {
+    setParticipantAuthError(null);
+    setSigningInParticipant(true);
+    try {
+      const cred = await signInWithPopup(auth, googleProvider);
+      if (cred.user?.displayName && !fullName.trim()) {
+        setFullName(cred.user.displayName.trim().slice(0, 100));
+      }
+    } catch (err: unknown) {
+      setParticipantAuthError(formatFirebaseAuthError(err));
+    } finally {
+      setSigningInParticipant(false);
+    }
+  };
+
+  const handleParticipantSignOut = async () => {
+    setParticipantAuthError(null);
+    try {
+      await signOut(auth);
+    } catch (err: unknown) {
+      setParticipantAuthError(formatFirebaseAuthError(err));
+    }
+  };
+
   const customDepartmentLabel =
     selectedEvent?.departmentLabel?.trim() || 'Class / Department';
   const customConsentText =
@@ -297,6 +355,13 @@ export default function ParticipantCheckIn({
       setFormError('No active workshop or seminar session is selected.');
       return;
     }
+    if (requiresParticipantLogin && (!user || !participantVerifiedEmail)) {
+      setFormError(
+        'This session requires you to sign in with your Google email before submitting check-in.'
+      );
+      return;
+    }
+
     const cleanName = fullName.trim();
     const cleanDept = classDepartment.trim();
 
@@ -338,20 +403,27 @@ export default function ParticipantCheckIn({
     const attendanceId = generateSafeId('att');
     const finalExcuse = computedStatus === 'Late' ? cleanExcuse : '';
 
+    const payload: Record<string, unknown> = {
+      eventId: selectedEvent.id,
+      eventName: selectedEvent.title,
+      fullName: cleanName.slice(0, 100),
+      classDepartment: cleanDept.slice(0, 100),
+      photoDataUrl,
+      photoConsent: true,
+      attendanceDate,
+      checkInTime,
+      serverTimestamp: serverTimestamp(),
+      status: computedStatus,
+      lateExcuse: finalExcuse,
+    };
+
+    if (requiresParticipantLogin && user && participantVerifiedEmail) {
+      payload.participantEmail = participantVerifiedEmail.slice(0, 128);
+      payload.participantUid = user.uid;
+    }
+
     try {
-      await setDoc(doc(db, 'attendances', attendanceId), {
-        eventId: selectedEvent.id,
-        eventName: selectedEvent.title,
-        fullName: cleanName.slice(0, 100),
-        classDepartment: cleanDept.slice(0, 100),
-        photoDataUrl,
-        photoConsent: true,
-        attendanceDate,
-        checkInTime,
-        serverTimestamp: serverTimestamp(),
-        status: computedStatus,
-        lateExcuse: finalExcuse,
-      });
+      await setDoc(doc(db, 'attendances', attendanceId), payload);
 
       setReceipt({
         id: attendanceId,
@@ -365,12 +437,16 @@ export default function ParticipantCheckIn({
         recordedAtIso: submitMoment.toISOString(),
         status: computedStatus,
         lateExcuse: finalExcuse,
+        participantEmail:
+          requiresParticipantLogin && participantVerifiedEmail
+            ? participantVerifiedEmail
+            : undefined,
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       if (msg.toLowerCase().includes('permission')) {
         setFormError(
-          'Unable to record attendance. This session may have just closed—please verify with your facilitator.'
+          'Unable to record attendance. This session may have closed or requires verified Google email login.'
         );
       } else {
         setFormError('Network error while submitting attendance. Please try again.');
@@ -495,6 +571,14 @@ export default function ParticipantCheckIn({
                   {receipt.status}
                 </dd>
               </div>
+              {receipt.participantEmail && (
+                <div className="py-3 flex justify-between gap-4">
+                  <dt className="text-slate-500">Verified Email</dt>
+                  <dd className="font-medium text-slate-900 text-right break-all">
+                    {receipt.participantEmail}
+                  </dd>
+                </div>
+              )}
               {receipt.status === 'Late' && receipt.lateExcuse && (
                 <div className="py-3 flex justify-between gap-4">
                   <dt className="text-slate-500 shrink-0">Late Excuse</dt>
@@ -508,7 +592,9 @@ export default function ParticipantCheckIn({
 
           <div className="px-6 py-4 sm:px-8 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
             <span className="text-xs text-slate-500">
-              No account or email required. You may close this page now.
+              {receipt.participantEmail
+                ? 'Verified email recorded. You may close this page now.'
+                : 'No account or email required. You may close this page now.'}
             </span>
             <button
               type="button"
@@ -578,7 +664,11 @@ export default function ParticipantCheckIn({
           <div>
             <div className="flex items-center justify-between gap-2 text-xs font-semibold text-blue-700">
               <span>INSTANT QR CHECK-IN</span>
-              <span>NO LOGIN REQUIRED</span>
+              <span>
+                {requiresParticipantLogin
+                  ? 'EMAIL LOGIN REQUIRED'
+                  : 'NO LOGIN REQUIRED'}
+              </span>
             </div>
 
             {loadingEvents ? (
@@ -698,7 +788,9 @@ export default function ParticipantCheckIn({
           <div className="pt-4 border-t border-slate-100 flex items-start gap-2.5 text-xs text-slate-500">
             <ShieldCheck className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
             <span>
-              No sign-up, account, email address, or password is required to mark attendance.
+              {requiresParticipantLogin
+                ? 'This session requires signing in with a Google email before submitting attendance.'
+                : 'No sign-up, account, email address, or password is required to mark attendance.'}
             </span>
           </div>
         </section>
@@ -710,9 +802,83 @@ export default function ParticipantCheckIn({
               Participant Check-In Form
             </h2>
             <p className="text-sm text-slate-600 mt-1">
-              Complete the three fields below and confirm photo consent to submit your attendance.
+              {requiresParticipantLogin
+                ? 'Verify your Google email, complete the three fields below, and confirm photo consent to submit.'
+                : 'Complete the three fields below and confirm photo consent to submit your attendance.'}
             </p>
           </div>
+
+          {requiresParticipantLogin && (
+            <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50/60 p-4 space-y-3">
+              {participantVerifiedEmail ? (
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-9 h-9 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                      <Mail className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold text-slate-500">
+                        Verified Participant Email
+                      </div>
+                      <div className="text-sm font-bold text-slate-900 truncate">
+                        {participantVerifiedEmail}
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void handleParticipantSignOut()}
+                    className="min-h-[38px] px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 inline-flex items-center gap-1.5 whitespace-nowrap self-start sm:self-auto"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    <span>Switch Account</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="flex items-start gap-2.5">
+                    <Mail className="w-4 h-4 text-blue-700 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-bold text-slate-900">
+                        Google Email Required for This Session
+                      </p>
+                      <p className="text-xs text-slate-600 mt-0.5">
+                        The organizer enabled email verification for this session. Sign in with your Google account to unlock submission.
+                      </p>
+                    </div>
+                  </div>
+
+                  {participantAuthError && (
+                    <div
+                      role="alert"
+                      className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800 space-y-1"
+                    >
+                      <p className="font-semibold">{participantAuthError.title}</p>
+                      <p>{participantAuthError.message}</p>
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => void handleParticipantGoogleSignIn()}
+                    disabled={signingInParticipant}
+                    className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition-colors inline-flex items-center justify-center gap-2 disabled:opacity-60"
+                  >
+                    {signingInParticipant ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Mail className="w-4 h-4" />
+                    )}
+                    <span>
+                      {signingInParticipant
+                        ? 'Signing in...'
+                        : 'Sign in with Google'}
+                    </span>
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-6" noValidate>
             {/* 1. Full Name */}
@@ -973,7 +1139,11 @@ export default function ParticipantCheckIn({
             {/* Large SUBMIT ATTENDANCE CTA Button */}
             <button
               type="submit"
-              disabled={submitting || !selectedEvent}
+              disabled={
+                submitting ||
+                !selectedEvent ||
+                (requiresParticipantLogin && !participantVerifiedEmail)
+              }
               className="w-full h-14 px-6 rounded-xl bg-blue-700 hover:bg-blue-800 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed text-white text-base font-bold tracking-wide transition-all flex items-center justify-center gap-2.5 shadow-sm"
             >
               {submitting ? (

@@ -11,6 +11,11 @@ export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
 export const BOOTSTRAPPED_ADMIN_EMAIL = 'rohantmr.lover@gmail.com';
+export const ADMIN_EMAIL_PATTERN = /^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$/;
+
+export function normalizeAdminEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
 
 export interface AuthErrorDetails {
   code: string;

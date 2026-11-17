@@ -10,6 +10,13 @@ service cloud.firestore {
       return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
+    function isValidEmail(email) {
+      return email is string &&
+        email.size() >= 5 &&
+        email.size() <= 128 &&
+        email.matches('^[a-z0-9._%+\\-]+@[a-z0-9.\\-]+\\.[a-z]{2,}$');
+    }
+
     function incoming() {
       return request.resource.data;
     }
@@ -22,12 +29,20 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function userEmailLower() {
+      return request.auth.token.email is string ? request.auth.token.email.lower() : '';
+    }
+
     function isAdmin() {
       return isSignedIn() &&
         request.auth.token.email_verified == true &&
         (
-          request.auth.token.email == 'rohantmr.lover@gmail.com' ||
-          exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+          userEmailLower() == 'rohantmr.lover@gmail.com' ||
+          exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+          (
+            isValidEmail(userEmailLower()) &&
+            exists(/databases/$(database)/documents/authorizedAdmins/$(userEmailLower()))
+          )
         );
     }
 
@@ -42,7 +57,7 @@ service cloud.firestore {
           'startTime', 'lateCutoffTime', 'cutoffTimestamp', 'status',
           'createdByUid', 'createdAt', 'updatedAt',
           'departmentLabel', 'departmentPresets', 'consentText',
-          'facilitators', 'principalName'
+          'facilitators', 'principalName', 'requireParticipantLogin'
         ]) &&
         data.title is string && data.title.size() >= 2 && data.title.size() <= 140 &&
         data.category is string && data.category.size() >= 1 && data.category.size() <= 80 &&
@@ -60,7 +75,8 @@ service cloud.firestore {
         (!('departmentPresets' in data) || (data.departmentPresets is string && data.departmentPresets.size() <= 300)) &&
         (!('consentText' in data) || (data.consentText is string && data.consentText.size() <= 400)) &&
         (!('facilitators' in data) || (data.facilitators is string && data.facilitators.size() <= 200)) &&
-        (!('principalName' in data) || (data.principalName is string && data.principalName.size() <= 120));
+        (!('principalName' in data) || (data.principalName is string && data.principalName.size() <= 120)) &&
+        (!('requireParticipantLogin' in data) || data.requireParticipantLogin is bool);
     }
 
     function isValidAttendance(data) {
@@ -72,7 +88,8 @@ service cloud.firestore {
         data.keys().hasOnly([
           'eventId', 'eventName', 'fullName', 'classDepartment',
           'photoDataUrl', 'photoConsent', 'attendanceDate',
-          'checkInTime', 'serverTimestamp', 'status', 'lateExcuse'
+          'checkInTime', 'serverTimestamp', 'status', 'lateExcuse',
+          'participantEmail', 'participantUid'
         ]) &&
         isValidId(data.eventId) &&
         data.eventName is string && data.eventName.size() >= 2 && data.eventName.size() <= 140 &&
@@ -90,7 +107,9 @@ service cloud.firestore {
         data.serverTimestamp is timestamp &&
         data.status in ['On Time', 'Late'] &&
         data.lateExcuse is string && data.lateExcuse.size() <= 300 &&
-        (data.status == 'On Time' || data.lateExcuse.size() >= 3);
+        (data.status == 'On Time' || data.lateExcuse.size() >= 3) &&
+        (!('participantEmail' in data) || data.participantEmail == '' || isValidEmail(data.participantEmail)) &&
+        (!('participantUid' in data) || data.participantUid == '' || isValidId(data.participantUid));
     }
 
     function isValidAdminUser(data) {
@@ -99,6 +118,16 @@ service cloud.firestore {
         isValidId(data.uid) &&
         data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100 &&
         isValidId(data.addedByUid) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidAuthorizedAdmin(data) {
+      return data.keys().hasAll(['email', 'displayName', 'addedByUid', 'addedByEmail', 'createdAt']) &&
+        data.keys().hasOnly(['email', 'displayName', 'addedByUid', 'addedByEmail', 'createdAt']) &&
+        isValidEmail(data.email) &&
+        data.displayName is string && data.displayName.size() <= 100 &&
+        isValidId(data.addedByUid) &&
+        isValidEmail(data.addedByEmail) &&
         data.createdAt is timestamp;
     }
 
@@ -152,7 +181,7 @@ service cloud.firestore {
           'title', 'category', 'description', 'venue', 'eventDate',
           'startTime', 'lateCutoffTime', 'cutoffTimestamp', 'status', 'updatedAt',
           'departmentLabel', 'departmentPresets', 'consentText',
-          'facilitators', 'principalName'
+          'facilitators', 'principalName', 'requireParticipantLogin'
         ]);
       allow delete: if isAdmin() && isValidId(eventId);
     }
@@ -166,7 +195,20 @@ service cloud.firestore {
         incoming().serverTimestamp == request.time &&
         exists(/databases/$(database)/documents/events/$(incoming().eventId)) &&
         get(/databases/$(database)/documents/events/$(incoming().eventId)).data.status == 'active' &&
-        incoming().eventName == get(/databases/$(database)/documents/events/$(incoming().eventId)).data.title;
+        incoming().eventName == get(/databases/$(database)/documents/events/$(incoming().eventId)).data.title &&
+        (
+          !('requireParticipantLogin' in get(/databases/$(database)/documents/events/$(incoming().eventId)).data) ||
+          get(/databases/$(database)/documents/events/$(incoming().eventId)).data.requireParticipantLogin == false ||
+          (
+            isSignedIn() &&
+            request.auth.token.email_verified == true &&
+            isValidEmail(userEmailLower()) &&
+            'participantEmail' in incoming() &&
+            incoming().participantEmail == userEmailLower() &&
+            'participantUid' in incoming() &&
+            incoming().participantUid == request.auth.uid
+          )
+        );
       allow update: if isAdmin() &&
         isValidId(attendanceId) &&
         isValidAttendance(incoming()) &&
@@ -191,6 +233,25 @@ service cloud.firestore {
         incoming().createdAt == request.time;
       allow update: if false;
       allow delete: if isAdmin() && isValidId(adminUid) && adminUid != request.auth.uid;
+    }
+
+    match /authorizedAdmins/{adminEmail} {
+      allow get: if isSignedIn() &&
+        request.auth.token.email_verified == true &&
+        isValidEmail(adminEmail) &&
+        (adminEmail == userEmailLower() || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isAdmin() &&
+        isValidEmail(adminEmail) &&
+        isValidAuthorizedAdmin(incoming()) &&
+        incoming().email == adminEmail &&
+        incoming().addedByUid == request.auth.uid &&
+        incoming().addedByEmail == userEmailLower() &&
+        incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isAdmin() &&
+        isValidEmail(adminEmail) &&
+        adminEmail != userEmailLower();
     }
 
     match /dashboardSettings/{settingId} {

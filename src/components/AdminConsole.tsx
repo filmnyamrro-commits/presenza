@@ -14,12 +14,15 @@ import {
   Loader2,
   Lock,
   LogOut,
+  Mail,
   MapPin,
   Plus,
   QrCode,
   Search,
   ShieldAlert,
+  ShieldCheck,
   Trash2,
+  UserPlus,
   Users,
   X,
 } from 'lucide-react';
@@ -44,15 +47,20 @@ import {
 } from 'firebase/firestore';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ADMIN_EMAIL_PATTERN,
   auth,
+  type AuthErrorDetails,
   BOOTSTRAPPED_ADMIN_EMAIL,
   db,
+  formatFirebaseAuthError,
   googleProvider,
   handleFirestoreError,
+  normalizeAdminEmail,
 } from '../firebase';
 import {
   type AttendanceRecord,
   type AttendanceStatus,
+  type AuthorizedAdminRecord,
   type EventCategory,
   type EventRecord,
   OperationType,
@@ -89,7 +97,7 @@ export default function AdminConsole({
 }: AdminConsoleProps) {
   const [checkingAdmin, setCheckingAdmin] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [authError, setAuthError] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<AuthErrorDetails | null>(null);
   const [signingIn, setSigningIn] = useState(false);
 
   const [events, setEvents] = useState<EventRecord[]>([]);
@@ -151,15 +159,38 @@ export default function AdminConsole({
   );
   const [evFacilitators, setEvFacilitators] = useState('');
   const [evPrincipalName, setEvPrincipalName] = useState('');
+  const [evRequireParticipantLogin, setEvRequireParticipantLogin] =
+    useState(false);
   const [savingEvent, setSavingEvent] = useState(false);
   const [eventFormError, setEventFormError] = useState<string | null>(null);
 
-  // Verify admin authorization
+  // Authorized Administrators management state
+  const [authorizedAdmins, setAuthorizedAdmins] = useState<
+    AuthorizedAdminRecord[]
+  >([]);
+  const [showAdminsModal, setShowAdminsModal] = useState(false);
+  const [newAdminEmail, setNewAdminEmail] = useState('');
+  const [newAdminName, setNewAdminName] = useState('');
+  const [savingAdmin, setSavingAdmin] = useState(false);
+  const [adminManageError, setAdminManageError] = useState<string | null>(null);
+  const [removingAdminEmail, setRemovingAdminEmail] = useState<string | null>(
+    null
+  );
+
+  // Verify admin authorization (email allowlist, legacy UID doc, or bootstrap owner)
   useEffect(() => {
     let active = true;
     async function verifyAdmin() {
       if (!authReady) return;
-      if (!user) {
+      if (!user || !user.email) {
+        if (active) {
+          setIsAdmin(false);
+          setCheckingAdmin(false);
+        }
+        return;
+      }
+
+      if (!user.emailVerified) {
         if (active) {
           setIsAdmin(false);
           setCheckingAdmin(false);
@@ -168,7 +199,9 @@ export default function AdminConsole({
       }
 
       setCheckingAdmin(true);
-      if (user.emailVerified && user.email === BOOTSTRAPPED_ADMIN_EMAIL) {
+      const emailLower = normalizeAdminEmail(user.email);
+
+      if (emailLower === BOOTSTRAPPED_ADMIN_EMAIL) {
         if (active) {
           setIsAdmin(true);
           setCheckingAdmin(false);
@@ -177,9 +210,26 @@ export default function AdminConsole({
       }
 
       try {
+        if (ADMIN_EMAIL_PATTERN.test(emailLower)) {
+          const emailSnap = await getDoc(
+            doc(db, 'authorizedAdmins', emailLower)
+          );
+          if (emailSnap.exists()) {
+            if (active) {
+              setIsAdmin(true);
+              setCheckingAdmin(false);
+            }
+            return;
+          }
+        }
+      } catch {
+        // Fall through to legacy UID check
+      }
+
+      try {
         const adminSnap = await getDoc(doc(db, 'admins', user.uid));
         if (active) {
-          setIsAdmin(Boolean(user.emailVerified && adminSnap.exists()));
+          setIsAdmin(adminSnap.exists());
           setCheckingAdmin(false);
         }
       } catch {
@@ -200,6 +250,7 @@ export default function AdminConsole({
     if (!authReady || !isAdmin) {
       setEvents([]);
       setAttendances([]);
+      setAuthorizedAdmins([]);
       setLoadingData(false);
       return;
     }
@@ -261,10 +312,26 @@ export default function AdminConsole({
       }
     );
 
+    const unsubAdmins = onSnapshot(
+      collection(db, 'authorizedAdmins'),
+      (snap) => {
+        const list: AuthorizedAdminRecord[] = snap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<AuthorizedAdminRecord, 'id'>),
+        }));
+        list.sort((a, b) => a.email.localeCompare(b.email));
+        setAuthorizedAdmins(list);
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, 'authorizedAdmins');
+      }
+    );
+
     return () => {
       unsubEvents();
       unsubAttendances();
       unsubBgSetting();
+      unsubAdmins();
     };
   }, [authReady, isAdmin]);
 
@@ -385,27 +452,86 @@ export default function AdminConsole({
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (err: unknown) {
-      const code =
-        typeof err === 'object' && err !== null && 'code' in err
-          ? String((err as { code?: unknown }).code)
-          : '';
-      if (code === 'auth/unauthorized-domain') {
-        const host = window.location.hostname;
-        setAuthError(
-          `Domain "${host}" is not authorized for Google sign-in. Add "${host}" in Firebase Console → Authentication → Settings → Authorized domains.`
-        );
-      } else if (code === 'auth/popup-blocked') {
-        setAuthError(
-          'Sign-in popup was blocked by your browser. Please allow popups for this site and try again.'
-        );
-      } else if (code === 'auth/popup-closed-by-user') {
-        setAuthError('Sign-in popup was closed before completing login.');
-      } else {
-        const msg = err instanceof Error ? err.message : 'Sign-in was cancelled.';
-        setAuthError(msg);
-      }
+      setAuthError(formatFirebaseAuthError(err));
     } finally {
       setSigningIn(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    setAuthError(null);
+    try {
+      await signOut(auth);
+    } catch (err: unknown) {
+      setAuthError(formatFirebaseAuthError(err));
+    }
+  };
+
+  const handleAddAuthorizedAdmin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !user.email) return;
+    setAdminManageError(null);
+
+    const emailLower = normalizeAdminEmail(newAdminEmail);
+    const displayName = newAdminName.trim().slice(0, 100);
+
+    if (!ADMIN_EMAIL_PATTERN.test(emailLower) || emailLower.length > 128) {
+      setAdminManageError('Please enter a valid Google email address.');
+      return;
+    }
+
+    if (
+      emailLower === BOOTSTRAPPED_ADMIN_EMAIL ||
+      authorizedAdmins.some((a) => a.email === emailLower)
+    ) {
+      setAdminManageError(`${emailLower} is already an authorized administrator.`);
+      return;
+    }
+
+    setSavingAdmin(true);
+    try {
+      await setDoc(doc(db, 'authorizedAdmins', emailLower), {
+        email: emailLower,
+        displayName,
+        addedByUid: user.uid,
+        addedByEmail: normalizeAdminEmail(user.email),
+        createdAt: serverTimestamp(),
+      });
+      setNewAdminEmail('');
+      setNewAdminName('');
+    } catch (error) {
+      setAdminManageError('Unable to add administrator email. Please try again.');
+      handleFirestoreError(
+        error,
+        OperationType.CREATE,
+        `authorizedAdmins/${emailLower}`
+      );
+    } finally {
+      setSavingAdmin(false);
+    }
+  };
+
+  const handleRemoveAuthorizedAdmin = async (emailLower: string) => {
+    if (!user || !user.email) return;
+    const currentEmail = normalizeAdminEmail(user.email);
+    if (emailLower === currentEmail) {
+      setAdminManageError('You cannot remove your own currently signed-in account.');
+      return;
+    }
+
+    setAdminManageError(null);
+    setRemovingAdminEmail(emailLower);
+    try {
+      await deleteDoc(doc(db, 'authorizedAdmins', emailLower));
+    } catch (error) {
+      setAdminManageError('Unable to remove administrator email.');
+      handleFirestoreError(
+        error,
+        OperationType.DELETE,
+        `authorizedAdmins/${emailLower}`
+      );
+    } finally {
+      setRemovingAdminEmail(null);
     }
   };
 
@@ -426,6 +552,7 @@ export default function AdminConsole({
     );
     setEvFacilitators('');
     setEvPrincipalName('');
+    setEvRequireParticipantLogin(false);
     setEventFormError(null);
     setShowEventModal(true);
   };
@@ -446,6 +573,7 @@ export default function AdminConsole({
     );
     setEvFacilitators(ev.facilitators || '');
     setEvPrincipalName(ev.principalName || '');
+    setEvRequireParticipantLogin(Boolean(ev.requireParticipantLogin));
     setEventFormError(null);
     setShowEventModal(true);
   };
@@ -546,6 +674,7 @@ export default function AdminConsole({
           consentText: consentStatement,
           facilitators,
           principalName,
+          requireParticipantLogin: evRequireParticipantLogin,
           updatedAt: serverTimestamp(),
         });
       } else {
@@ -563,6 +692,7 @@ export default function AdminConsole({
           consentText: consentStatement,
           facilitators,
           principalName,
+          requireParticipantLogin: evRequireParticipantLogin,
           status: 'active' as const,
           createdByUid: user.uid,
         };
@@ -851,16 +981,29 @@ export default function AdminConsole({
               Administrator Sign In
             </h1>
             <p className="mt-2 text-sm text-slate-600 leading-relaxed">
-              Only workshop administrators need to log in. Participants check in directly via QR code without creating an account.
+              Sign in with an authorized teacher or administrator Google account. Participants check in via QR code based on each session&apos;s settings.
             </p>
           </div>
 
           {authError && (
             <div
               role="alert"
-              className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-800 text-left"
+              className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-900 text-left space-y-1.5"
             >
-              {authError}
+              <div className="flex items-center justify-between gap-2">
+                <p className="font-semibold text-rose-950">{authError.title}</p>
+                <span className="font-mono-tabular text-[11px] text-rose-700">
+                  {authError.code}
+                </span>
+              </div>
+              <p className="leading-relaxed text-rose-800">{authError.message}</p>
+              {authError.helpSteps && authError.helpSteps.length > 0 && (
+                <ol className="list-decimal list-inside space-y-1 pt-1 text-rose-800">
+                  {authError.helpSteps.map((step, idx) => (
+                    <li key={idx}>{step}</li>
+                  ))}
+                </ol>
+              )}
             </div>
           )}
 
@@ -895,16 +1038,27 @@ export default function AdminConsole({
               Administrator Access Restricted
             </h1>
             <p className="mt-2 text-sm text-slate-600">
-              Signed in as <span className="font-semibold">{user.email}</span>. This account is not registered as an administrator for PRESENZA.
+              Signed in as <span className="font-semibold">{user.email || 'Unknown account'}</span>.{' '}
+              {!user.emailVerified
+                ? 'This account email is not verified. Please sign in with a verified Google administrator account.'
+                : 'This account is not registered as an administrator for PRESENZA.'}
             </p>
           </div>
+          {authError && (
+            <div
+              role="alert"
+              className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-800 text-left"
+            >
+              {authError.message}
+            </div>
+          )}
           <button
             type="button"
-            onClick={() => void signOut(auth)}
+            onClick={() => void handleSignOut()}
             className="min-h-[44px] px-5 py-2.5 rounded-xl border border-slate-300 bg-white text-sm font-semibold text-slate-800 hover:bg-slate-100 transition-colors inline-flex items-center gap-2"
           >
             <LogOut className="w-4 h-4" />
-            <span>Sign Out</span>
+            <span>Sign Out &amp; Switch Account</span>
           </button>
         </div>
       </div>
@@ -928,6 +1082,17 @@ export default function AdminConsole({
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            type="button"
+            onClick={() => {
+              setAdminManageError(null);
+              setShowAdminsModal(true);
+            }}
+            className="min-h-[44px] px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-100 text-slate-800 text-sm font-semibold transition-colors inline-flex items-center gap-2 whitespace-nowrap shrink-0"
+          >
+            <ShieldCheck className="w-4 h-4 text-blue-700" />
+            <span>Manage Admins ({authorizedAdmins.length + 1})</span>
+          </button>
           {(events.length > 0 || attendances.length > 0) && (
             <button
               type="button"
@@ -948,7 +1113,7 @@ export default function AdminConsole({
           </button>
           <button
             type="button"
-            onClick={() => void signOut(auth)}
+            onClick={() => void handleSignOut()}
             className="min-h-[44px] px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-sm font-semibold transition-colors inline-flex items-center gap-2 whitespace-nowrap shrink-0"
           >
             <LogOut className="w-4 h-4" />
@@ -1190,6 +1355,20 @@ export default function AdminConsole({
                             }`}
                           >
                             {ev.status === 'active' ? 'Active' : 'Closed'}
+                          </span>
+                          <span
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold ${
+                              ev.requireParticipantLogin
+                                ? 'bg-blue-50 text-blue-800 border border-blue-200'
+                                : 'bg-slate-50 text-slate-600 border border-slate-200'
+                            }`}
+                          >
+                            <Mail className="w-3 h-3" />
+                            <span>
+                              {ev.requireParticipantLogin
+                                ? 'Email Login'
+                                : 'No Login'}
+                            </span>
                           </span>
                         </div>
                         <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
@@ -1698,8 +1877,15 @@ export default function AdminConsole({
                           />
                         </button>
                       </td>
-                      <td className="py-2.5 px-4 font-semibold text-slate-900">
-                        {rec.fullName}
+                      <td className="py-2.5 px-4">
+                        <div className="font-semibold text-slate-900">
+                          {rec.fullName}
+                        </div>
+                        {rec.participantEmail && (
+                          <div className="text-[11px] text-slate-500">
+                            {rec.participantEmail}
+                          </div>
+                        )}
                       </td>
                       <td className="py-2.5 px-4 text-slate-700">
                         {rec.classDepartment}
@@ -1998,6 +2184,62 @@ export default function AdminConsole({
                     onChange={(e) => setEvConsentText(e.target.value)}
                     className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-600"
                   />
+                </div>
+
+                {/* Participant Check-In Login Mode */}
+                <div className="pt-2 border-t border-slate-100 space-y-2">
+                  <div className="text-xs font-semibold text-slate-700">
+                    Participant Check-In Login Mode
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <label
+                      className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-colors ${
+                        !evRequireParticipantLogin
+                          ? 'border-blue-600 bg-blue-50/50'
+                          : 'border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="participant-login-mode"
+                        checked={!evRequireParticipantLogin}
+                        onChange={() => setEvRequireParticipantLogin(false)}
+                        className="mt-0.5 text-blue-700 focus:ring-blue-600"
+                      />
+                      <div>
+                        <div className="text-xs font-bold text-slate-900">
+                          Without Email (No Login)
+                        </div>
+                        <div className="text-[11px] text-slate-600 mt-0.5">
+                          Instant QR check-in with no Google login required.
+                        </div>
+                      </div>
+                    </label>
+
+                    <label
+                      className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-colors ${
+                        evRequireParticipantLogin
+                          ? 'border-blue-600 bg-blue-50/50'
+                          : 'border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="participant-login-mode"
+                        checked={evRequireParticipantLogin}
+                        onChange={() => setEvRequireParticipantLogin(true)}
+                        className="mt-0.5 text-blue-700 focus:ring-blue-600"
+                      />
+                      <div>
+                        <div className="text-xs font-bold text-slate-900">
+                          With Google Email Login
+                        </div>
+                        <div className="text-[11px] text-slate-600 mt-0.5">
+                          Participants sign in with Google before submitting.
+                        </div>
+                      </div>
+                    </label>
+                  </div>
                 </div>
               </div>
 
@@ -2449,6 +2691,176 @@ export default function AdminConsole({
                   </div>
                 );
               })()}
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Authorized Administrators Modal */}
+      {showAdminsModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-sm p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="admins-modal-title"
+        >
+          <div className="w-full max-w-xl rounded-2xl bg-white border border-slate-200 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2
+                    id="admins-modal-title"
+                    className="text-base sm:text-lg font-bold text-slate-900"
+                  >
+                    Authorized Administrators
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    Only listed Google email accounts can sign in to this Admin Console.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAdminsModal(false)}
+                className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100"
+                aria-label="Close administrators modal"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5 overflow-y-auto">
+              {/* Add New Admin Email Form */}
+              <form
+                onSubmit={handleAddAuthorizedAdmin}
+                className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 space-y-3"
+              >
+                <div className="text-xs font-bold text-slate-900 uppercase tracking-wide flex items-center gap-1.5">
+                  <UserPlus className="w-3.5 h-3.5 text-blue-700" />
+                  <span>Authorize Teacher or Admin Email</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <input
+                    type="email"
+                    required
+                    maxLength={128}
+                    value={newAdminEmail}
+                    onChange={(e) => setNewAdminEmail(e.target.value)}
+                    placeholder="teacher@school.edu"
+                    aria-label="Administrator Google email"
+                    className="min-h-[42px] px-3 py-2 text-sm bg-white border border-slate-300 rounded-xl text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  />
+                  <input
+                    type="text"
+                    maxLength={100}
+                    value={newAdminName}
+                    onChange={(e) => setNewAdminName(e.target.value)}
+                    placeholder="Name or role (optional)"
+                    aria-label="Administrator name or role"
+                    className="min-h-[42px] px-3 py-2 text-sm bg-white border border-slate-300 rounded-xl text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  />
+                </div>
+
+                {adminManageError && (
+                  <p className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+                    {adminManageError}
+                  </p>
+                )}
+
+                <div className="flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={savingAdmin}
+                    className="min-h-[40px] px-4 py-2 rounded-xl bg-blue-700 hover:bg-blue-800 text-white text-xs font-semibold transition-colors inline-flex items-center gap-1.5 disabled:opacity-60"
+                  >
+                    {savingAdmin ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <UserPlus className="w-3.5 h-3.5" />
+                    )}
+                    <span>Add Authorized Admin</span>
+                  </button>
+                </div>
+              </form>
+
+              {/* Current Authorized List */}
+              <div className="space-y-2">
+                <div className="text-xs font-bold text-slate-700 uppercase tracking-wide">
+                  Authorized Accounts ({authorizedAdmins.length + 1})
+                </div>
+
+                <div className="divide-y divide-slate-100 rounded-xl border border-slate-200 overflow-hidden bg-white">
+                  {/* Bootstrap Owner Entry */}
+                  <div className="px-4 py-3 flex items-center justify-between gap-3 bg-slate-50/60">
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-slate-900 truncate">
+                        {BOOTSTRAPPED_ADMIN_EMAIL}
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        Primary Owner (Bootstrap)
+                        {user.email &&
+                        normalizeAdminEmail(user.email) ===
+                          BOOTSTRAPPED_ADMIN_EMAIL
+                          ? ' · Current session'
+                          : ''}
+                      </div>
+                    </div>
+                    <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 shrink-0">
+                      Owner
+                    </span>
+                  </div>
+
+                  {authorizedAdmins.map((adminItem) => {
+                    const isSelf =
+                      Boolean(user.email) &&
+                      normalizeAdminEmail(user.email!) === adminItem.email;
+                    return (
+                      <div
+                        key={adminItem.id}
+                        className="px-4 py-3 flex items-center justify-between gap-3"
+                      >
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold text-slate-900 truncate">
+                            {adminItem.email}
+                          </div>
+                          <div className="text-xs text-slate-500 truncate">
+                            {adminItem.displayName
+                              ? `${adminItem.displayName} · `
+                              : ''}
+                            Added by {adminItem.addedByEmail}
+                            {isSelf ? ' · Current session' : ''}
+                          </div>
+                        </div>
+
+                        {isSelf ? (
+                          <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
+                            Active
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={removingAdminEmail === adminItem.email}
+                            onClick={() =>
+                              void handleRemoveAuthorizedAdmin(adminItem.email)
+                            }
+                            className="min-h-[36px] px-3 py-1.5 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 text-xs font-semibold text-rose-700 transition-colors inline-flex items-center gap-1 shrink-0 disabled:opacity-50"
+                          >
+                            {removingAdminEmail === adminItem.email ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Trash2 className="w-3.5 h-3.5" />
+                            )}
+                            <span>Remove</span>
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           </div>
         </div>

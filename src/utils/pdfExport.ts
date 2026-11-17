@@ -497,39 +497,39 @@ function drawCertificatePage(
         branding.logoDataUrl,
         detectImageFormat(branding.logoDataUrl),
         20,
-        18.5,
-        14,
-        14
+        17.5,
+        13,
+        13
       );
     } catch {
       // Skip malformed logo gracefully
     }
   }
   if (certOrgName) {
-    const orgTextX = branding?.logoDataUrl ? 36.5 : 20;
+    const orgTextX = branding?.logoDataUrl ? 35.5 : 20;
     const orgLines = doc.splitTextToSize(certOrgName, 58).slice(0, 2);
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9.5);
+    doc.setFontSize(9);
     doc.setTextColor(15, 23, 42);
-    doc.text(orgLines, orgTextX, 24.5);
+    doc.text(orgLines, orgTextX, 23.5);
   }
 
   // Institutional Kicker
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(11);
+  doc.setFontSize(10);
   doc.setTextColor(29, 78, 216);
-  doc.text('PRESENZA', pageWidth / 2, 28, { align: 'center' });
+  doc.text('PRESENZA', pageWidth / 2, 24, { align: 'center' });
 
   // Main Certificate Heading
   doc.setFont('times', 'bold');
-  doc.setFontSize(28);
+  doc.setFontSize(26);
   doc.setTextColor(15, 23, 42);
-  doc.text('CERTIFICATE OF RECOGNITION', pageWidth / 2, 41, { align: 'center' });
+  doc.text('CERTIFICATE OF RECOGNITION', pageWidth / 2, 35, { align: 'center' });
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(11);
+  doc.setFontSize(10);
   doc.setTextColor(100, 116, 139);
-  doc.text('TOP 5 EARLIEST ARRIVAL HONORS', pageWidth / 2, 49, { align: 'center' });
+  doc.text('TOP 5 EARLIEST ARRIVAL HONORS', pageWidth / 2, 42, { align: 'center' });
 
   // Rank Distinction Ribbon Box
   const isPodium = rank <= 3;
@@ -538,10 +538,10 @@ function drawCertificatePage(
   doc.setLineWidth(0.5);
   const badgeW = 92;
   const badgeX = (pageWidth - badgeW) / 2;
-  doc.roundedRect(badgeX, 55, badgeW, 11, 2, 2, 'FD');
+  doc.roundedRect(badgeX, 46.5, badgeW, 9, 2, 2, 'FD');
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(11);
+  doc.setFontSize(10);
   if (isPodium) {
     doc.setTextColor(146, 64, 14);
   } else {
@@ -550,18 +550,27 @@ function drawCertificatePage(
   doc.text(
     `RANK #${rank} · ${ordinalLabel(rank).toUpperCase()}`,
     pageWidth / 2,
-    62.2,
+    52.5,
     { align: 'center' }
   );
 
-  // Content Layout: Participant Photo + Formal Citation
-  const photoBoxSize = 44;
-  const photoX = 28;
-  const photoY = 76;
+  // Centered Participant Photo (horizontally centered, dedicated vertical band with no text overlap)
+  const textCenterX = pageWidth / 2;
+  const photoBoxSize = 34;
+  const photoX = (pageWidth - photoBoxSize) / 2;
+  const photoY = 59.5;
 
   doc.setDrawColor(203, 213, 225);
   doc.setFillColor(248, 250, 252);
-  doc.roundedRect(photoX - 2, photoY - 2, photoBoxSize + 4, photoBoxSize + 4, 2, 2, 'FD');
+  doc.roundedRect(
+    photoX - 1.5,
+    photoY - 1.5,
+    photoBoxSize + 3,
+    photoBoxSize + 3,
+    2,
+    2,
+    'FD'
+  );
 
   if (record.photoDataUrl) {
     try {
@@ -580,48 +589,52 @@ function drawCertificatePage(
   }
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.5);
+  doc.setFontSize(8);
   doc.setTextColor(100, 116, 139);
-  doc.text('Verified Check-In Photo', photoX + photoBoxSize / 2, photoY + photoBoxSize + 7, {
+  doc.text('Verified Check-In Photo', textCenterX, photoY + photoBoxSize + 6, {
     align: 'center',
   });
 
-  // Recipient Text Block (Right of photo)
-  const textCenterX = 174;
+  // Recipient Text Block (Centered cleanly below photo)
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(11);
+  doc.setFontSize(10.5);
   doc.setTextColor(71, 85, 105);
-  doc.text('This certificate is proudly awarded to', textCenterX, 80, {
+  doc.text('This certificate is proudly awarded to', textCenterX, 106.5, {
     align: 'center',
   });
 
   doc.setFont('times', 'bold');
-  doc.setFontSize(26);
+  doc.setFontSize(24);
   doc.setTextColor(15, 23, 42);
-  const nameLines = doc.splitTextToSize(record.fullName, 170);
-  doc.text(nameLines, textCenterX, 93, { align: 'center' });
+  const nameLines = doc.splitTextToSize(record.fullName, 210).slice(0, 2);
+  const nameStartY = 116.5;
+  doc.text(nameLines, textCenterX, nameStartY, { align: 'center' });
 
-  const afterNameY = 93 + (nameLines.length - 1) * 9;
+  const afterNameY = nameStartY + (nameLines.length - 1) * 8.5;
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(12);
+  doc.setFontSize(11.5);
   doc.setTextColor(29, 78, 216);
-  doc.text(record.classDepartment, textCenterX, afterNameY + 9, {
+  doc.text(record.classDepartment, textCenterX, afterNameY + 8, {
     align: 'center',
   });
 
   // Divider line under department
   doc.setDrawColor(203, 213, 225);
   doc.setLineWidth(0.4);
-  doc.line(95, afterNameY + 14, 253, afterNameY + 14);
+  doc.line(85, afterNameY + 12, 212, afterNameY + 12);
 
-  // Citation Paragraph
+  // Citation Paragraph (Centered below divider)
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10.5);
+  doc.setFontSize(10);
   doc.setTextColor(51, 65, 85);
   const citation = `For demonstrating outstanding punctuality and dedication by arriving among the earliest participants (#${rank} out of ${totalParticipants} attendees) at "${record.eventName}" on ${record.attendanceDate}, checking in at ${record.checkInTime} (${record.status}).`;
-  const citationLines = doc.splitTextToSize(citation, 172);
-  doc.text(citationLines, textCenterX, afterNameY + 23, { align: 'center' });
+  const citationLines = doc.splitTextToSize(citation, 215).slice(0, 3);
+  const citationY = afterNameY + 19;
+  doc.text(citationLines, textCenterX, citationY, { align: 'center' });
+
+  const citationEndY = citationY + (citationLines.length - 1) * 4.5;
+  const sealY = Math.min(Math.max(citationEndY + 8.5, 156), 162);
 
   // Recognition Seal Above Signature Row
   doc.setFont('helvetica', 'bold');
@@ -630,12 +643,12 @@ function drawCertificatePage(
   doc.text(
     `EARLY BIRD #${rank} · PRESENZA RECOGNITION AWARD`,
     pageWidth / 2,
-    154,
+    sealY,
     { align: 'center' }
   );
 
   // Footer Signature & Timestamp Row (3 Columns: Check-In Time | Facilitators | Principal)
-  const footerY = 177;
+  const footerY = 180;
   doc.setDrawColor(148, 163, 184);
   doc.setLineWidth(0.4);
 
