@@ -25,9 +25,11 @@ interface QrPosterModalProps {
   onOpenCheckIn: (eventId: string) => void;
   onPreviewPhoto: (record: AttendanceRecord) => void;
   dashboardBgUrl?: string | null;
+  dashboardBgOpacity?: number;
   savingBg?: boolean;
   bgError?: string | null;
   onUploadBackground?: (file: File) => Promise<void>;
+  onChangeBackgroundOpacity?: (opacity: number) => void;
   onRemoveBackground?: () => Promise<void>;
   branding?: OrganizationBranding | null;
 }
@@ -39,9 +41,11 @@ export default function QrPosterModal({
   onOpenCheckIn,
   onPreviewPhoto,
   dashboardBgUrl,
+  dashboardBgOpacity = 25,
   savingBg = false,
   bgError,
   onUploadBackground,
+  onChangeBackgroundOpacity,
   onRemoveBackground,
   branding,
 }: QrPosterModalProps) {
@@ -283,7 +287,8 @@ export default function QrPosterModal({
                 src={dashboardBgUrl}
                 alt=""
                 aria-hidden="true"
-                className="absolute inset-0 w-full h-full object-cover object-top pointer-events-none select-none"
+                style={{ opacity: Math.min(1, Math.max(0, dashboardBgOpacity / 100)) }}
+                className="absolute inset-0 w-full h-full object-cover object-top pointer-events-none select-none transition-opacity duration-150"
               />
             )}
 
@@ -302,14 +307,10 @@ export default function QrPosterModal({
               />
             )}
 
-            <div
-              className={`relative z-10 flex flex-col flex-1 min-h-0 ${
-                dashboardBgUrl ? 'bg-white/75 backdrop-blur-[2px]' : ''
-              }`}
-            >
+            <div className="relative z-10 flex flex-col flex-1 min-h-0">
               <div
                 className={`px-5 sm:px-6 py-4 border-b border-slate-200/80 flex flex-wrap items-center justify-between gap-3 shrink-0 ${
-                  dashboardBgUrl ? 'bg-white/85' : ''
+                  dashboardBgUrl ? 'bg-white/80 backdrop-blur-[2px]' : ''
                 }`}
               >
                 <div>
@@ -359,6 +360,26 @@ export default function QrPosterModal({
                       )}
                       <span>{dashboardBgUrl ? 'Change JPEG Bg' : 'JPEG Portrait Bg'}</span>
                     </button>
+                  )}
+                  {dashboardBgUrl && onChangeBackgroundOpacity && (
+                    <label className="min-h-[34px] px-2.5 py-1 rounded-lg border border-slate-300 bg-white text-[11px] font-semibold text-slate-700 inline-flex items-center gap-2">
+                      <span>Opacity</span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={dashboardBgOpacity}
+                        onChange={(e) =>
+                          onChangeBackgroundOpacity(Number(e.target.value))
+                        }
+                        aria-label="Live dashboard background photo opacity"
+                        className="w-16 accent-blue-700 cursor-pointer"
+                      />
+                      <span className="font-mono-tabular w-8 text-right">
+                        {dashboardBgOpacity}%
+                      </span>
+                    </label>
                   )}
                   {dashboardBgUrl && onRemoveBackground && (
                     <button

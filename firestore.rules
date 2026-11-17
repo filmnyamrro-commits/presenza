@@ -46,6 +46,31 @@ service cloud.firestore {
         );
     }
 
+    function isValidOptionalImage(val, maxLen) {
+      return val is string &&
+        val.size() <= maxLen &&
+        (
+          val.size() == 0 ||
+          (
+            val.size() >= 30 &&
+            (
+              val[0:22] == 'data:image/png;base64,' ||
+              val[0:23] == 'data:image/jpeg;base64,' ||
+              val[0:23] == 'data:image/webp;base64,'
+            )
+          )
+        );
+    }
+
+    function isValidCertElement(el) {
+      return el is map &&
+        el.keys().hasAll(['visible', 'x', 'y']) &&
+        el.keys().hasOnly(['visible', 'x', 'y']) &&
+        el.visible is bool &&
+        el.x is number && el.x >= 0 && el.x <= 297 &&
+        el.y is number && el.y >= 0 && el.y <= 210;
+    }
+
     function isValidEvent(data) {
       return data.keys().hasAll([
           'title', 'category', 'description', 'venue', 'eventDate',
@@ -133,11 +158,12 @@ service cloud.firestore {
 
     function isValidDashboardSetting(data) {
       return data.keys().hasAll(['backgroundDataUrl', 'updatedByUid', 'updatedAt']) &&
-        data.keys().hasOnly(['backgroundDataUrl', 'updatedByUid', 'updatedAt']) &&
+        data.keys().hasOnly(['backgroundDataUrl', 'backgroundOpacity', 'updatedByUid', 'updatedAt']) &&
         data.backgroundDataUrl is string &&
         data.backgroundDataUrl.size() >= 30 &&
         data.backgroundDataUrl.size() <= 450000 &&
         data.backgroundDataUrl[0:23] == 'data:image/jpeg;base64,' &&
+        (!('backgroundOpacity' in data) || (data.backgroundOpacity is number && data.backgroundOpacity >= 0 && data.backgroundOpacity <= 100)) &&
         isValidId(data.updatedByUid) &&
         data.updatedAt is timestamp;
     }
@@ -146,18 +172,55 @@ service cloud.firestore {
       return data.keys().hasAll(['organizationName', 'logoDataUrl', 'updatedByUid', 'updatedAt']) &&
         data.keys().hasOnly(['organizationName', 'logoDataUrl', 'updatedByUid', 'updatedAt']) &&
         data.organizationName is string && data.organizationName.size() <= 120 &&
-        data.logoDataUrl is string && data.logoDataUrl.size() <= 350000 &&
-        (
-          data.logoDataUrl.size() == 0 ||
-          (
-            data.logoDataUrl.size() >= 30 &&
-            (
-              data.logoDataUrl[0:22] == 'data:image/png;base64,' ||
-              data.logoDataUrl[0:23] == 'data:image/jpeg;base64,' ||
-              data.logoDataUrl[0:23] == 'data:image/webp;base64,'
-            )
-          )
-        ) &&
+        isValidOptionalImage(data.logoDataUrl, 350000) &&
+        isValidId(data.updatedByUid) &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidCertificateSetting(data) {
+      return data.keys().hasAll([
+          'themeId', 'backgroundDataUrl', 'backgroundOpacity',
+          'facilitatorSignatureDataUrl', 'principalSignatureDataUrl',
+          'elements', 'updatedByUid', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'themeId', 'backgroundDataUrl', 'backgroundOpacity',
+          'facilitatorSignatureDataUrl', 'principalSignatureDataUrl',
+          'elements', 'updatedByUid', 'updatedAt'
+        ]) &&
+        data.themeId in [
+          'classic-navy', 'emerald-academic', 'royal-slate', 'crimson-crest', 'teal-modern'
+        ] &&
+        isValidOptionalImage(data.backgroundDataUrl, 340000) &&
+        data.backgroundOpacity is number && data.backgroundOpacity >= 0 && data.backgroundOpacity <= 100 &&
+        isValidOptionalImage(data.facilitatorSignatureDataUrl, 150000) &&
+        isValidOptionalImage(data.principalSignatureDataUrl, 150000) &&
+        data.elements is map &&
+        data.elements.keys().hasAll([
+          'orgLogo', 'orgName', 'kicker', 'title', 'subtitle',
+          'rankBadge', 'photo', 'awardedTo', 'recipientName', 'department',
+          'citation', 'seal', 'dateFooter', 'facilitatorBlock', 'principalBlock'
+        ]) &&
+        data.elements.keys().hasOnly([
+          'orgLogo', 'orgName', 'kicker', 'title', 'subtitle',
+          'rankBadge', 'photo', 'awardedTo', 'recipientName', 'department',
+          'citation', 'seal', 'dateFooter', 'facilitatorBlock', 'principalBlock'
+        ]) &&
+        isValidCertElement(data.elements.orgLogo) &&
+        isValidCertElement(data.elements.orgName) &&
+        isValidCertElement(data.elements.kicker) &&
+        isValidCertElement(data.elements.title) &&
+        isValidCertElement(data.elements.subtitle) &&
+        isValidCertElement(data.elements.rankBadge) &&
+        isValidCertElement(data.elements.photo) &&
+        isValidCertElement(data.elements.awardedTo) &&
+        isValidCertElement(data.elements.recipientName) &&
+        isValidCertElement(data.elements.department) &&
+        isValidCertElement(data.elements.citation) &&
+        isValidCertElement(data.elements.seal) &&
+        isValidCertElement(data.elements.dateFooter) &&
+        isValidCertElement(data.elements.facilitatorBlock) &&
+        isValidCertElement(data.elements.principalBlock) &&
         isValidId(data.updatedByUid) &&
         data.updatedAt is timestamp;
     }
@@ -267,7 +330,7 @@ service cloud.firestore {
         isValidDashboardSetting(incoming()) &&
         incoming().updatedByUid == request.auth.uid &&
         incoming().updatedAt == request.time &&
-        incoming().diff(existing()).affectedKeys().hasOnly(['backgroundDataUrl', 'updatedByUid', 'updatedAt']);
+        incoming().diff(existing()).affectedKeys().hasOnly(['backgroundDataUrl', 'backgroundOpacity', 'updatedByUid', 'updatedAt']);
       allow delete: if isAdmin() && isValidId(settingId);
     }
 
@@ -286,6 +349,27 @@ service cloud.firestore {
         incoming().updatedAt == request.time &&
         incoming().diff(existing()).affectedKeys().hasOnly(['organizationName', 'logoDataUrl', 'updatedByUid', 'updatedAt']);
       allow delete: if isAdmin() && isValidId(brandingId);
+    }
+
+    match /certificateSettings/{settingId} {
+      allow get: if isAdmin() && isValidId(settingId);
+      allow list: if isAdmin();
+      allow create: if isAdmin() &&
+        isValidId(settingId) &&
+        isValidCertificateSetting(incoming()) &&
+        incoming().updatedByUid == request.auth.uid &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() &&
+        isValidId(settingId) &&
+        isValidCertificateSetting(incoming()) &&
+        incoming().updatedByUid == request.auth.uid &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'themeId', 'backgroundDataUrl', 'backgroundOpacity',
+          'facilitatorSignatureDataUrl', 'principalSignatureDataUrl',
+          'elements', 'updatedByUid', 'updatedAt'
+        ]);
+      allow delete: if isAdmin() && isValidId(settingId);
     }
   }
 }

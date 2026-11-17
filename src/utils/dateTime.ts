@@ -22,6 +22,44 @@ export function formatTime24h(date: Date): string {
   return `${hours}:${minutes}`;
 }
 
+export function parse24hParts(time24: string): { hour24: number; minute: number } {
+  const [rawH, rawM] = time24.split(':').map(Number);
+  const hour24 = Number.isFinite(rawH) ? Math.min(23, Math.max(0, rawH)) : 0;
+  const minute = Number.isFinite(rawM) ? Math.min(59, Math.max(0, rawM)) : 0;
+  return { hour24, minute };
+}
+
+export function parse24hTo12h(time24: string): {
+  hour12: number;
+  minute: number;
+  period: 'AM' | 'PM';
+} {
+  const { hour24, minute } = parse24hParts(time24);
+  const period: 'AM' | 'PM' = hour24 >= 12 ? 'PM' : 'AM';
+  const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
+  return { hour12, minute, period };
+}
+
+export function format12hTo24h(
+  hour12: number,
+  minute: number,
+  period: 'AM' | 'PM'
+): string {
+  const safeH12 = Math.min(12, Math.max(1, hour12));
+  const safeMin = Math.min(59, Math.max(0, minute));
+  let hour24 = safeH12 % 12;
+  if (period === 'PM') {
+    hour24 += 12;
+  }
+  return `${String(hour24).padStart(2, '0')}:${String(safeMin).padStart(2, '0')}`;
+}
+
+export function format24hPartsToString(hour24: number, minute: number): string {
+  const safeH = Math.min(23, Math.max(0, hour24));
+  const safeM = Math.min(59, Math.max(0, minute));
+  return `${String(safeH).padStart(2, '0')}:${String(safeM).padStart(2, '0')}`;
+}
+
 export function buildCutoffDate(eventDate: string, lateCutoffTime: string): Date {
   const [y, m, d] = eventDate.split('-').map(Number);
   const [hh, mm] = lateCutoffTime.split(':').map(Number);

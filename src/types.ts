@@ -74,6 +74,50 @@ export interface AuthorizedAdminRecord {
   createdAt: Timestamp;
 }
 
+export type CertificateThemeId =
+  | 'classic-navy'
+  | 'emerald-academic'
+  | 'royal-slate'
+  | 'crimson-crest'
+  | 'teal-modern';
+
+export type CertificateElementKey =
+  | 'orgLogo'
+  | 'orgName'
+  | 'kicker'
+  | 'title'
+  | 'subtitle'
+  | 'rankBadge'
+  | 'photo'
+  | 'awardedTo'
+  | 'recipientName'
+  | 'department'
+  | 'citation'
+  | 'seal'
+  | 'dateFooter'
+  | 'facilitatorBlock'
+  | 'principalBlock';
+
+export interface CertificateElementConfig {
+  visible: boolean;
+  x: number; // mm from left edge (0..297 on A4 landscape)
+  y: number; // mm from top edge (0..210 on A4 landscape)
+}
+
+export type CertificateElementsMap = Record<
+  CertificateElementKey,
+  CertificateElementConfig
+>;
+
+export interface CertificateSettings {
+  themeId: CertificateThemeId;
+  backgroundDataUrl: string;
+  backgroundOpacity: number; // 0..100
+  facilitatorSignatureDataUrl: string;
+  principalSignatureDataUrl: string;
+  elements: CertificateElementsMap;
+}
+
 export enum OperationType {
   CREATE = 'create',
   UPDATE = 'update',

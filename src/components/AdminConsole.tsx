@@ -16,6 +16,7 @@ import {
   LogOut,
   Mail,
   MapPin,
+  Palette,
   Plus,
   QrCode,
   Search,
@@ -61,6 +62,7 @@ import {
   type AttendanceRecord,
   type AttendanceStatus,
   type AuthorizedAdminRecord,
+  type CertificateSettings,
   type EventCategory,
   type EventRecord,
   OperationType,
@@ -69,16 +71,23 @@ import {
 import { exportAttendanceCsv } from '../utils/csvExport';
 import { compressJpegBackground, compressLogoFile } from '../utils/imageCompress';
 import {
+  DEFAULT_CERTIFICATE_SETTINGS,
   downloadBig5CertificatesPdf,
   downloadRecapitulationPdf,
   downloadSingleCertificatePdf,
+  mergeCertificateSettings,
 } from '../utils/pdfExport';
 import {
   buildCutoffDate,
+  format12hTo24h,
+  format24hPartsToString,
   formatLocalDateYmd,
   formatTime24h,
   generateSafeId,
+  parse24hParts,
+  parse24hTo12h,
 } from '../utils/dateTime';
+import CertificateCustomizerModal from './CertificateCustomizerModal';
 import EventQrThumbnail from './EventQrThumbnail';
 import QrPosterModal from './QrPosterModal';
 
@@ -127,9 +136,20 @@ export default function AdminConsole({
 
   // Live dashboard JPEG portrait background state
   const [dashboardBgUrl, setDashboardBgUrl] = useState<string | null>(null);
+  const [dashboardBgOpacity, setDashboardBgOpacity] = useState<number>(25);
   const [savingBg, setSavingBg] = useState(false);
   const [bgError, setBgError] = useState<string | null>(null);
   const bgInputRef = useRef<HTMLInputElement | null>(null);
+  const bgOpacitySaveTimerRef = useRef<number | null>(null);
+
+  // Certificate studio customization state
+  const [certificateSettings, setCertificateSettings] =
+    useState<CertificateSettings>(DEFAULT_CERTIFICATE_SETTINGS);
+  const [showCertCustomizer, setShowCertCustomizer] = useState(false);
+  const [savingCertSettings, setSavingCertSettings] = useState(false);
+  const [certSettingsError, setCertSettingsError] = useState<string | null>(
+    null
+  );
 
   // School / Company Logo & Name branding state
   const [orgNameInput, setOrgNameInput] = useState('');
@@ -161,6 +181,7 @@ export default function AdminConsole({
   const [evPrincipalName, setEvPrincipalName] = useState('');
   const [evRequireParticipantLogin, setEvRequireParticipantLogin] =
     useState(false);
+  const [timeFormatMode, setTimeFormatMode] = useState<'24h' | '12h'>('24h');
   const [savingEvent, setSavingEvent] = useState(false);
   const [eventFormError, setEventFormError] = useState<string | null>(null);
 
@@ -301,14 +322,47 @@ export default function AdminConsole({
       doc(db, 'dashboardSettings', 'live'),
       (snap) => {
         if (snap.exists()) {
-          const data = snap.data() as { backgroundDataUrl?: string };
+          const data = snap.data() as {
+            backgroundDataUrl?: string;
+            backgroundOpacity?: number;
+          };
           setDashboardBgUrl(data.backgroundDataUrl || null);
+          if (
+            typeof data.backgroundOpacity === 'number' &&
+            Number.isFinite(data.backgroundOpacity)
+          ) {
+            setDashboardBgOpacity(
+              Math.min(100, Math.max(0, data.backgroundOpacity))
+            );
+          }
         } else {
           setDashboardBgUrl(null);
         }
       },
       (error) => {
         handleFirestoreError(error, OperationType.GET, 'dashboardSettings/live');
+      }
+    );
+
+    const unsubCertSettings = onSnapshot(
+      doc(db, 'certificateSettings', 'default'),
+      (snap) => {
+        if (snap.exists()) {
+          setCertificateSettings(
+            mergeCertificateSettings(
+              snap.data() as Partial<CertificateSettings>
+            )
+          );
+        } else {
+          setCertificateSettings(DEFAULT_CERTIFICATE_SETTINGS);
+        }
+      },
+      (error) => {
+        handleFirestoreError(
+          error,
+          OperationType.GET,
+          'certificateSettings/default'
+        );
       }
     );
 
@@ -331,7 +385,11 @@ export default function AdminConsole({
       unsubEvents();
       unsubAttendances();
       unsubBgSetting();
+      unsubCertSettings();
       unsubAdmins();
+      if (bgOpacitySaveTimerRef.current !== null) {
+        window.clearTimeout(bgOpacitySaveTimerRef.current);
+      }
     };
   }, [authReady, isAdmin]);
 
@@ -343,6 +401,7 @@ export default function AdminConsole({
       const dataUrl = await compressJpegBackground(file);
       await setDoc(doc(db, 'dashboardSettings', 'live'), {
         backgroundDataUrl: dataUrl,
+        backgroundOpacity: dashboardBgOpacity,
         updatedByUid: user.uid,
         updatedAt: serverTimestamp(),
       });
@@ -355,6 +414,31 @@ export default function AdminConsole({
     }
   };
 
+  const handleChangeDashboardBgOpacity = (nextOpacity: number) => {
+    const clamped = Math.min(100, Math.max(0, Math.round(nextOpacity)));
+    setDashboardBgOpacity(clamped);
+    if (!user || !dashboardBgUrl) return;
+
+    if (bgOpacitySaveTimerRef.current !== null) {
+      window.clearTimeout(bgOpacitySaveTimerRef.current);
+    }
+
+    bgOpacitySaveTimerRef.current = window.setTimeout(() => {
+      bgOpacitySaveTimerRef.current = null;
+      void updateDoc(doc(db, 'dashboardSettings', 'live'), {
+        backgroundOpacity: clamped,
+        updatedByUid: user.uid,
+        updatedAt: serverTimestamp(),
+      }).catch((error) => {
+        handleFirestoreError(
+          error,
+          OperationType.UPDATE,
+          'dashboardSettings/live'
+        );
+      });
+    }, 300);
+  };
+
   const handleRemoveDashboardBg = async () => {
     setBgError(null);
     setSavingBg(true);
@@ -365,6 +449,35 @@ export default function AdminConsole({
       handleFirestoreError(error, OperationType.DELETE, 'dashboardSettings/live');
     } finally {
       setSavingBg(false);
+    }
+  };
+
+  const handleSaveCertificateSettings = async (
+    nextSettings: CertificateSettings
+  ) => {
+    if (!user) return;
+    setCertSettingsError(null);
+    setSavingCertSettings(true);
+    try {
+      const normalized = mergeCertificateSettings(nextSettings);
+      await setDoc(doc(db, 'certificateSettings', 'default'), {
+        ...normalized,
+        updatedByUid: user.uid,
+        updatedAt: serverTimestamp(),
+      });
+      setCertificateSettings(normalized);
+      setShowCertCustomizer(false);
+    } catch (error) {
+      setCertSettingsError(
+        'Unable to save certificate customization. Please ensure image sizes are valid and try again.'
+      );
+      handleFirestoreError(
+        error,
+        OperationType.WRITE,
+        'certificateSettings/default'
+      );
+    } finally {
+      setSavingCertSettings(false);
     }
   };
 
@@ -1085,6 +1198,17 @@ export default function AdminConsole({
           <button
             type="button"
             onClick={() => {
+              setCertSettingsError(null);
+              setShowCertCustomizer(true);
+            }}
+            className="min-h-[44px] px-4 py-2 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 text-sm font-semibold transition-colors inline-flex items-center gap-2 whitespace-nowrap shrink-0"
+          >
+            <Palette className="w-4 h-4 text-amber-700" />
+            <span>Certificate Studio</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
               setAdminManageError(null);
               setShowAdminsModal(true);
             }}
@@ -1447,7 +1571,10 @@ export default function AdminConsole({
               src={dashboardBgUrl}
               alt=""
               aria-hidden="true"
-              className="absolute inset-0 w-full h-full object-cover object-top pointer-events-none select-none"
+              style={{
+                opacity: Math.min(1, Math.max(0, dashboardBgOpacity / 100)),
+              }}
+              className="absolute inset-0 w-full h-full object-cover object-top pointer-events-none select-none transition-opacity duration-150"
             />
           )}
 
@@ -1464,14 +1591,10 @@ export default function AdminConsole({
             aria-label="Upload JPEG portrait background for live dashboard"
           />
 
-          <div
-            className={`relative z-10 ${
-              dashboardBgUrl ? 'bg-white/75 backdrop-blur-[2px]' : ''
-            }`}
-          >
+          <div className="relative z-10">
             <div
               className={`px-5 py-4 border-b border-slate-200/80 flex flex-wrap items-center justify-between gap-2 ${
-                dashboardBgUrl ? 'bg-white/85' : ''
+                dashboardBgUrl ? 'bg-white/80 backdrop-blur-[2px]' : ''
               }`}
             >
               <div>
@@ -1492,7 +1615,7 @@ export default function AdminConsole({
                 </p>
               </div>
 
-              <div className="flex items-center gap-1.5">
+              <div className="flex flex-wrap items-center gap-1.5">
                 <span className="text-xs font-mono-tabular font-semibold text-slate-700 mr-1">
                   {attendances.length} total
                 </span>
@@ -1509,6 +1632,26 @@ export default function AdminConsole({
                   )}
                   <span>{dashboardBgUrl ? 'Change JPEG Bg' : 'JPEG Portrait Bg'}</span>
                 </button>
+                {dashboardBgUrl && (
+                  <label className="min-h-[34px] px-2 py-1 rounded-lg border border-slate-300 bg-white text-[11px] font-semibold text-slate-700 inline-flex items-center gap-1.5">
+                    <span>Opacity</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={dashboardBgOpacity}
+                      onChange={(e) =>
+                        handleChangeDashboardBgOpacity(Number(e.target.value))
+                      }
+                      aria-label="Real-time feed background photo opacity"
+                      className="w-14 accent-blue-700 cursor-pointer"
+                    />
+                    <span className="font-mono-tabular w-7 text-right">
+                      {dashboardBgOpacity}%
+                    </span>
+                  </label>
+                )}
                 {dashboardBgUrl && (
                   <button
                     type="button"
@@ -1726,7 +1869,8 @@ export default function AdminConsole({
                   sessionChronologicalRecords,
                   selectedEventObj?.title,
                   eventsById,
-                  branding
+                  branding,
+                  certificateSettings
                 )
               }
               disabled={sessionBig5.length === 0}
@@ -1751,21 +1895,35 @@ export default function AdminConsole({
                   {selectedEventObj ? selectedEventObj.title : 'All Sessions'}
                 </span>
               </div>
-              <button
-                type="button"
-                onClick={() =>
-                  downloadBig5CertificatesPdf(
-                    sessionChronologicalRecords,
-                    selectedEventObj?.title,
-                    eventsById,
-                    branding
-                  )
-                }
-                className="min-h-[36px] px-3 py-1.5 rounded-lg border border-amber-300 bg-white hover:bg-amber-100 text-xs font-semibold text-amber-900 transition-colors inline-flex items-center gap-1.5 self-start sm:self-auto whitespace-nowrap"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Download All {sessionBig5.length} Certificates (PDF)</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCertSettingsError(null);
+                    setShowCertCustomizer(true);
+                  }}
+                  className="min-h-[36px] px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-xs font-semibold text-slate-800 transition-colors inline-flex items-center gap-1.5 whitespace-nowrap"
+                >
+                  <Palette className="w-3.5 h-3.5 text-blue-700" />
+                  <span>Customize Layout &amp; Signatures</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    downloadBig5CertificatesPdf(
+                      sessionChronologicalRecords,
+                      selectedEventObj?.title,
+                      eventsById,
+                      branding,
+                      certificateSettings
+                    )
+                  }
+                  className="min-h-[36px] px-3 py-1.5 rounded-lg border border-amber-300 bg-white hover:bg-amber-100 text-xs font-semibold text-amber-900 transition-colors inline-flex items-center gap-1.5 whitespace-nowrap"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download All {sessionBig5.length} Certificates (PDF)</span>
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
@@ -1811,7 +1969,8 @@ export default function AdminConsole({
                         idx + 1,
                         sessionChronologicalRecords.length,
                         eventsById.get(rec.eventId) ?? null,
-                        branding
+                        branding,
+                        certificateSettings
                       )
                     }
                     className="w-full min-h-[34px] px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-[11px] font-semibold text-slate-800 transition-colors inline-flex items-center justify-center gap-1 whitespace-nowrap"
@@ -1963,7 +2122,7 @@ export default function AdminConsole({
           aria-modal="true"
           aria-labelledby="event-modal-title"
         >
-          <div className="w-full max-w-lg rounded-2xl bg-white border border-slate-200 shadow-2xl overflow-hidden">
+          <div className="w-full max-w-xl rounded-2xl bg-white border border-slate-200 shadow-2xl overflow-hidden">
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
               <h2 id="event-modal-title" className="text-lg font-bold text-slate-900">
                 {editingEvent ? 'Edit Session' : 'Create Workshop / Session'}
@@ -2038,13 +2197,51 @@ export default function AdminConsole({
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label
+                    htmlFor="ev-date"
+                    className="block text-xs font-semibold text-slate-700"
+                  >
+                    Date &amp; Time Settings *
+                  </label>
+
+                  <div
+                    className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5"
+                    role="group"
+                    aria-label="Time format"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setTimeFormatMode('24h')}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors ${
+                        timeFormatMode === '24h'
+                          ? 'bg-white text-slate-900 shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      24-Hour
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTimeFormatMode('12h')}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors ${
+                        timeFormatMode === '12h'
+                          ? 'bg-white text-slate-900 shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      12-Hour (AM / PM)
+                    </button>
+                  </div>
+                </div>
+
                 <div>
                   <label
                     htmlFor="ev-date"
-                    className="block text-xs font-semibold text-slate-700 mb-1.5"
+                    className="block text-xs font-medium text-slate-600 mb-1"
                   >
-                    Date *
+                    Event Date *
                   </label>
                   <input
                     id="ev-date"
@@ -2055,37 +2252,173 @@ export default function AdminConsole({
                     className="w-full min-h-[44px] px-3 py-2 text-xs font-mono-tabular border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-600"
                   />
                 </div>
-                <div>
-                  <label
-                    htmlFor="ev-start"
-                    className="block text-xs font-semibold text-slate-700 mb-1.5"
-                  >
-                    Start Time *
-                  </label>
-                  <input
-                    id="ev-start"
-                    type="time"
-                    required
-                    value={evStartTime}
-                    onChange={(e) => setEvStartTime(e.target.value)}
-                    className="w-full min-h-[44px] px-3 py-2 text-xs font-mono-tabular border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-600"
-                  />
-                </div>
-                <div>
-                  <label
-                    htmlFor="ev-cutoff"
-                    className="block text-xs font-semibold text-slate-700 mb-1.5"
-                  >
-                    Late After *
-                  </label>
-                  <input
-                    id="ev-cutoff"
-                    type="time"
-                    required
-                    value={evCutoffTime}
-                    onChange={(e) => setEvCutoffTime(e.target.value)}
-                    className="w-full min-h-[44px] px-3 py-2 text-xs font-mono-tabular border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-600"
-                  />
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {(
+                    [
+                      {
+                        idPrefix: 'ev-start',
+                        label: 'Start Time *',
+                        value: evStartTime,
+                        onChange: setEvStartTime,
+                      },
+                      {
+                        idPrefix: 'ev-cutoff',
+                        label: 'Late After *',
+                        value: evCutoffTime,
+                        onChange: setEvCutoffTime,
+                      },
+                    ] as const
+                  ).map((field) => {
+                    const p24 = parse24hParts(field.value);
+                    const p12 = parse24hTo12h(field.value);
+
+                    return (
+                      <div
+                        key={field.idPrefix}
+                        className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 space-y-1.5"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <label
+                            htmlFor={`${field.idPrefix}-hour`}
+                            className="text-xs font-semibold text-slate-700"
+                          >
+                            {field.label}
+                          </label>
+                          <span className="font-mono-tabular text-[11px] text-slate-500">
+                            {timeFormatMode === '24h'
+                              ? `${String(p12.hour12).padStart(2, '0')}:${String(p12.minute).padStart(2, '0')} ${p12.period}`
+                              : `24h: ${field.value}`}
+                          </span>
+                        </div>
+
+                        {timeFormatMode === '24h' ? (
+                          <div className="flex items-center gap-1.5">
+                            <select
+                              id={`${field.idPrefix}-hour`}
+                              aria-label={`${field.label} hour (24-hour)`}
+                              value={p24.hour24}
+                              onChange={(e) =>
+                                field.onChange(
+                                  format24hPartsToString(
+                                    Number(e.target.value),
+                                    p24.minute
+                                  )
+                                )
+                              }
+                              className="flex-1 min-h-[40px] px-2.5 py-1.5 text-sm font-mono-tabular bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                            >
+                              {Array.from({ length: 24 }, (_, h) => (
+                                <option key={h} value={h}>
+                                  {String(h).padStart(2, '0')}
+                                </option>
+                              ))}
+                            </select>
+                            <span className="font-mono-tabular font-bold text-slate-500">
+                              :
+                            </span>
+                            <select
+                              aria-label={`${field.label} minute`}
+                              value={p24.minute}
+                              onChange={(e) =>
+                                field.onChange(
+                                  format24hPartsToString(
+                                    p24.hour24,
+                                    Number(e.target.value)
+                                  )
+                                )
+                              }
+                              className="flex-1 min-h-[40px] px-2.5 py-1.5 text-sm font-mono-tabular bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                            >
+                              {Array.from({ length: 60 }, (_, m) => (
+                                <option key={m} value={m}>
+                                  {String(m).padStart(2, '0')}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5">
+                            <select
+                              id={`${field.idPrefix}-hour`}
+                              aria-label={`${field.label} hour (12-hour)`}
+                              value={p12.hour12}
+                              onChange={(e) =>
+                                field.onChange(
+                                  format12hTo24h(
+                                    Number(e.target.value),
+                                    p12.minute,
+                                    p12.period
+                                  )
+                                )
+                              }
+                              className="flex-1 min-w-[60px] min-h-[40px] px-2 py-1.5 text-sm font-mono-tabular bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                            >
+                              {Array.from({ length: 12 }, (_, idx) => {
+                                const h = idx + 1;
+                                return (
+                                  <option key={h} value={h}>
+                                    {String(h).padStart(2, '0')}
+                                  </option>
+                                );
+                              })}
+                            </select>
+                            <span className="font-mono-tabular font-bold text-slate-500">
+                              :
+                            </span>
+                            <select
+                              aria-label={`${field.label} minute`}
+                              value={p12.minute}
+                              onChange={(e) =>
+                                field.onChange(
+                                  format12hTo24h(
+                                    p12.hour12,
+                                    Number(e.target.value),
+                                    p12.period
+                                  )
+                                )
+                              }
+                              className="flex-1 min-w-[60px] min-h-[40px] px-2 py-1.5 text-sm font-mono-tabular bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                            >
+                              {Array.from({ length: 60 }, (_, m) => (
+                                <option key={m} value={m}>
+                                  {String(m).padStart(2, '0')}
+                                </option>
+                              ))}
+                            </select>
+                            <div
+                              className="inline-flex rounded-lg border border-slate-300 bg-white overflow-hidden shrink-0"
+                              role="group"
+                              aria-label={`${field.label} AM or PM`}
+                            >
+                              {(['AM', 'PM'] as const).map((periodOption) => (
+                                <button
+                                  key={periodOption}
+                                  type="button"
+                                  onClick={() =>
+                                    field.onChange(
+                                      format12hTo24h(
+                                        p12.hour12,
+                                        p12.minute,
+                                        periodOption
+                                      )
+                                    )
+                                  }
+                                  className={`min-h-[38px] px-2.5 text-xs font-bold transition-colors ${
+                                    p12.period === periodOption
+                                      ? 'bg-blue-700 text-white'
+                                      : 'text-slate-700 hover:bg-slate-100'
+                                  }`}
+                                >
+                                  {periodOption}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -2280,9 +2613,11 @@ export default function AdminConsole({
           onOpenCheckIn={onOpenCheckIn}
           onPreviewPhoto={(rec) => setLightboxRecord(rec)}
           dashboardBgUrl={dashboardBgUrl}
+          dashboardBgOpacity={dashboardBgOpacity}
           savingBg={savingBg}
           bgError={bgError}
           onUploadBackground={handleUploadDashboardBg}
+          onChangeBackgroundOpacity={handleChangeDashboardBgOpacity}
           onRemoveBackground={handleRemoveDashboardBg}
           branding={branding}
         />
@@ -2506,7 +2841,8 @@ export default function AdminConsole({
                         attendances,
                         undefined,
                         eventsById,
-                        branding
+                        branding,
+                        certificateSettings
                       )
                     }
                     className="min-h-[38px] px-3 py-1.5 rounded-lg border border-amber-300 bg-amber-50 hover:bg-amber-100 text-xs font-semibold text-amber-900 inline-flex items-center gap-1.5 disabled:opacity-50"
@@ -2864,6 +3200,29 @@ export default function AdminConsole({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Certificate Studio & Layout Customizer Modal */}
+      {showCertCustomizer && (
+        <CertificateCustomizerModal
+          initialSettings={certificateSettings}
+          branding={branding}
+          dashboardBgUrl={dashboardBgUrl}
+          sampleRecord={sessionBig5[0] ?? attendances[0] ?? null}
+          sampleEvent={
+            (sessionBig5[0]
+              ? eventsById.get(sessionBig5[0].eventId)
+              : selectedEventObj ?? events[0]) ?? null
+          }
+          totalParticipants={Math.max(
+            1,
+            sessionChronologicalRecords.length || attendances.length
+          )}
+          saving={savingCertSettings}
+          error={certSettingsError}
+          onSave={handleSaveCertificateSettings}
+          onClose={() => setShowCertCustomizer(false)}
+        />
       )}
     </div>
   );

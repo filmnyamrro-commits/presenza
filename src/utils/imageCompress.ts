@@ -230,3 +230,202 @@ export async function compressLogoFile(file: File): Promise<string> {
   }
   return smallerCanvas.toDataURL('image/jpeg', 0.85);
 }
+
+const MAX_CERT_BG_DIMENSION = 1400;
+const MAX_CERT_BG_DATA_URL_LENGTH = 310_000;
+
+export async function compressCertificateBackground(
+  file: File
+): Promise<string> {
+  if (!file.type.startsWith('image/')) {
+    throw new Error('Please upload a valid image file (JPG, PNG, or WebP).');
+  }
+
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result);
+      } else {
+        reject(new Error('Failed to read selected background image.'));
+      }
+    };
+    reader.onerror = () =>
+      reject(new Error('Failed to read selected background image.'));
+    reader.readAsDataURL(file);
+  });
+
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const element = new Image();
+    element.onload = () => resolve(element);
+    element.onerror = () =>
+      reject(new Error('Selected file is not a valid image.'));
+    element.src = dataUrl;
+  });
+
+  const ratio = Math.min(
+    1,
+    MAX_CERT_BG_DIMENSION / Math.max(img.width || 1200, img.height || 800)
+  );
+  const width = Math.max(1, Math.round((img.width || 1200) * ratio));
+  const height = Math.max(1, Math.round((img.height || 800) * ratio));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    throw new Error('Unable to process certificate background image.');
+  }
+
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, width, height);
+  ctx.drawImage(img, 0, 0, width, height);
+
+  const qualities = [0.82, 0.7, 0.58, 0.45, 0.34];
+  for (const quality of qualities) {
+    const encoded = canvas.toDataURL('image/jpeg', quality);
+    if (encoded.length <= MAX_CERT_BG_DATA_URL_LENGTH) {
+      return encoded;
+    }
+  }
+
+  const fallbackCanvas = document.createElement('canvas');
+  fallbackCanvas.width = Math.max(320, Math.round(width * 0.65));
+  fallbackCanvas.height = Math.max(240, Math.round(height * 0.65));
+  const fbCtx = fallbackCanvas.getContext('2d');
+  if (!fbCtx) {
+    throw new Error('Unable to resize certificate background image.');
+  }
+  fbCtx.fillStyle = '#ffffff';
+  fbCtx.fillRect(0, 0, fallbackCanvas.width, fallbackCanvas.height);
+  fbCtx.drawImage(canvas, 0, 0, fallbackCanvas.width, fallbackCanvas.height);
+  return fallbackCanvas.toDataURL('image/jpeg', 0.5);
+}
+
+const MAX_SIGNATURE_DIMENSION = 420;
+const MAX_SIGNATURE_DATA_URL_LENGTH = 135_000;
+
+function encodeSignatureCanvas(canvas: HTMLCanvasElement): string {
+  const pngUrl = canvas.toDataURL('image/png');
+  if (pngUrl.length <= MAX_SIGNATURE_DATA_URL_LENGTH) {
+    return pngUrl;
+  }
+
+  const smaller = document.createElement('canvas');
+  smaller.width = Math.max(120, Math.round(canvas.width * 0.65));
+  smaller.height = Math.max(48, Math.round(canvas.height * 0.65));
+  const sCtx = smaller.getContext('2d');
+  if (!sCtx) {
+    throw new Error('Unable to resize signature image.');
+  }
+  sCtx.drawImage(canvas, 0, 0, smaller.width, smaller.height);
+  const smallerPng = smaller.toDataURL('image/png');
+  if (smallerPng.length <= MAX_SIGNATURE_DATA_URL_LENGTH) {
+    return smallerPng;
+  }
+
+  sCtx.globalCompositeOperation = 'destination-over';
+  sCtx.fillStyle = '#ffffff';
+  sCtx.fillRect(0, 0, smaller.width, smaller.height);
+  return smaller.toDataURL('image/jpeg', 0.8);
+}
+
+export async function compressSignatureFile(file: File): Promise<string> {
+  if (!file.type.startsWith('image/')) {
+    throw new Error(
+      'Please upload a valid signature image (PNG, JPG, WebP, or SVG).'
+    );
+  }
+
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result);
+      } else {
+        reject(new Error('Failed to read selected signature file.'));
+      }
+    };
+    reader.onerror = () =>
+      reject(new Error('Failed to read selected signature file.'));
+    reader.readAsDataURL(file);
+  });
+
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const element = new Image();
+    element.onload = () => resolve(element);
+    element.onerror = () =>
+      reject(new Error('Selected file is not a supported signature image.'));
+    element.src = dataUrl;
+  });
+
+  const sourceW = img.width || 360;
+  const sourceH = img.height || 140;
+  const ratio = Math.min(1, MAX_SIGNATURE_DIMENSION / Math.max(sourceW, sourceH));
+  const width = Math.max(1, Math.round(sourceW * ratio));
+  const height = Math.max(1, Math.round(sourceH * ratio));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    throw new Error('Unable to process signature image.');
+  }
+
+  ctx.drawImage(img, 0, 0, width, height);
+  return encodeSignatureCanvas(canvas);
+}
+
+export function compressSignatureCanvas(
+  sourceCanvas: HTMLCanvasElement
+): string {
+  const ctx = sourceCanvas.getContext('2d');
+  if (!ctx) {
+    throw new Error('Signature pad context is unavailable.');
+  }
+  const { width, height } = sourceCanvas;
+  const pixels = ctx.getImageData(0, 0, width, height).data;
+
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const alpha = pixels[(y * width + x) * 4 + 3];
+      if (alpha > 8) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+
+  if (maxX < minX || maxY < minY) {
+    throw new Error('Please draw a signature before saving.');
+  }
+
+  const pad = 8;
+  const cropX = Math.max(0, minX - pad);
+  const cropY = Math.max(0, minY - pad);
+  const cropW = Math.min(width - cropX, maxX - minX + 1 + pad * 2);
+  const cropH = Math.min(height - cropY, maxY - minY + 1 + pad * 2);
+
+  const ratio = Math.min(1, MAX_SIGNATURE_DIMENSION / Math.max(cropW, cropH));
+  const outW = Math.max(1, Math.round(cropW * ratio));
+  const outH = Math.max(1, Math.round(cropH * ratio));
+
+  const outCanvas = document.createElement('canvas');
+  outCanvas.width = outW;
+  outCanvas.height = outH;
+  const outCtx = outCanvas.getContext('2d');
+  if (!outCtx) {
+    throw new Error('Unable to finalize drawn signature.');
+  }
+  outCtx.drawImage(sourceCanvas, cropX, cropY, cropW, cropH, 0, 0, outW, outH);
+  return encodeSignatureCanvas(outCanvas);
+}

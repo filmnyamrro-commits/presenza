@@ -1,10 +1,276 @@
-import { jsPDF } from 'jspdf';
+import { GState, jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type {
   AttendanceRecord,
+  CertificateElementKey,
+  CertificateElementsMap,
+  CertificateSettings,
+  CertificateThemeId,
   EventRecord,
   OrganizationBranding,
 } from '../types';
+
+export interface CertificateThemeDefinition {
+  id: CertificateThemeId;
+  name: string;
+  description: string;
+  paperRgb: [number, number, number];
+  outerBorderRgb: [number, number, number];
+  innerBorderRgb: [number, number, number];
+  cornerAccentRgb: [number, number, number];
+  kickerRgb: [number, number, number];
+  headingRgb: [number, number, number];
+  subtitleRgb: [number, number, number];
+  bodyRgb: [number, number, number];
+  accentRgb: [number, number, number];
+  sealRgb: [number, number, number];
+  podiumBadgeBgRgb: [number, number, number];
+  podiumBadgeBorderRgb: [number, number, number];
+  podiumBadgeTextRgb: [number, number, number];
+  topBarRgb?: [number, number, number];
+  paperHex: string;
+  outerBorderHex: string;
+  innerBorderHex: string;
+  kickerHex: string;
+  headingHex: string;
+  accentHex: string;
+  sealHex: string;
+}
+
+export const CERTIFICATE_THEMES: Record<
+  CertificateThemeId,
+  CertificateThemeDefinition
+> = {
+  'classic-navy': {
+    id: 'classic-navy',
+    name: 'Classic Navy & Gold',
+    description: 'Traditional navy outer frame with warm gold inner trim',
+    paperRgb: [255, 255, 255],
+    outerBorderRgb: [15, 23, 42],
+    innerBorderRgb: [180, 83, 9],
+    cornerAccentRgb: [15, 23, 42],
+    kickerRgb: [29, 78, 216],
+    headingRgb: [15, 23, 42],
+    subtitleRgb: [100, 116, 139],
+    bodyRgb: [51, 65, 85],
+    accentRgb: [29, 78, 216],
+    sealRgb: [180, 83, 9],
+    podiumBadgeBgRgb: [254, 243, 199],
+    podiumBadgeBorderRgb: [180, 83, 9],
+    podiumBadgeTextRgb: [146, 64, 14],
+    paperHex: '#FFFFFF',
+    outerBorderHex: '#0F172A',
+    innerBorderHex: '#B45309',
+    kickerHex: '#1D4ED8',
+    headingHex: '#0F172A',
+    accentHex: '#1D4ED8',
+    sealHex: '#B45309',
+  },
+  'emerald-academic': {
+    id: 'emerald-academic',
+    name: 'Emerald Academic',
+    description: 'Ivory parchment with forest emerald border & bronze trim',
+    paperRgb: [252, 253, 251],
+    outerBorderRgb: [6, 95, 70],
+    innerBorderRgb: [180, 83, 9],
+    cornerAccentRgb: [6, 95, 70],
+    kickerRgb: [4, 120, 87],
+    headingRgb: [6, 78, 59],
+    subtitleRgb: [71, 85, 105],
+    bodyRgb: [51, 65, 85],
+    accentRgb: [4, 120, 87],
+    sealRgb: [180, 83, 9],
+    podiumBadgeBgRgb: [236, 253, 245],
+    podiumBadgeBorderRgb: [5, 150, 105],
+    podiumBadgeTextRgb: [6, 95, 70],
+    paperHex: '#FCFDFB',
+    outerBorderHex: '#065F46',
+    innerBorderHex: '#B45309',
+    kickerHex: '#047857',
+    headingHex: '#064E3B',
+    accentHex: '#047857',
+    sealHex: '#B45309',
+  },
+  'royal-slate': {
+    id: 'royal-slate',
+    name: 'Royal Slate Minimal',
+    description: 'Clean contemporary slate & indigo frame with top header accent',
+    paperRgb: [255, 255, 255],
+    outerBorderRgb: [51, 65, 85],
+    innerBorderRgb: [99, 102, 241],
+    cornerAccentRgb: [79, 70, 229],
+    kickerRgb: [79, 70, 229],
+    headingRgb: [15, 23, 42],
+    subtitleRgb: [100, 116, 139],
+    bodyRgb: [51, 65, 85],
+    accentRgb: [67, 56, 202],
+    sealRgb: [79, 70, 229],
+    podiumBadgeBgRgb: [238, 242, 255],
+    podiumBadgeBorderRgb: [79, 70, 229],
+    podiumBadgeTextRgb: [55, 48, 163],
+    topBarRgb: [30, 41, 59],
+    paperHex: '#FFFFFF',
+    outerBorderHex: '#334155',
+    innerBorderHex: '#6366F1',
+    kickerHex: '#4F46E5',
+    headingHex: '#0F172A',
+    accentHex: '#4338CA',
+    sealHex: '#4F46E5',
+  },
+  'crimson-crest': {
+    id: 'crimson-crest',
+    name: 'Crimson Crest',
+    description: 'Warm cream certificate paper with burgundy & antique gold borders',
+    paperRgb: [255, 253, 249],
+    outerBorderRgb: [136, 19, 55],
+    innerBorderRgb: [202, 138, 4],
+    cornerAccentRgb: [136, 19, 55],
+    kickerRgb: [159, 18, 57],
+    headingRgb: [136, 19, 55],
+    subtitleRgb: [87, 83, 78],
+    bodyRgb: [68, 64, 60],
+    accentRgb: [159, 18, 57],
+    sealRgb: [161, 98, 7],
+    podiumBadgeBgRgb: [254, 249, 195],
+    podiumBadgeBorderRgb: [202, 138, 4],
+    podiumBadgeTextRgb: [133, 77, 14],
+    paperHex: '#FFFDF9',
+    outerBorderHex: '#881337',
+    innerBorderHex: '#CA8A04',
+    kickerHex: '#9F1239',
+    headingHex: '#881337',
+    accentHex: '#9F1239',
+    sealHex: '#A16207',
+  },
+  'teal-modern': {
+    id: 'teal-modern',
+    name: 'Teal Modern Horizon',
+    description: 'Crisp white layout with vibrant oceanic teal & sky trim',
+    paperRgb: [255, 255, 255],
+    outerBorderRgb: [15, 118, 110],
+    innerBorderRgb: [2, 132, 199],
+    cornerAccentRgb: [15, 118, 110],
+    kickerRgb: [2, 132, 199],
+    headingRgb: [17, 24, 39],
+    subtitleRgb: [100, 116, 139],
+    bodyRgb: [51, 65, 85],
+    accentRgb: [15, 118, 110],
+    sealRgb: [2, 132, 199],
+    podiumBadgeBgRgb: [240, 253, 250],
+    podiumBadgeBorderRgb: [13, 148, 136],
+    podiumBadgeTextRgb: [17, 94, 89],
+    paperHex: '#FFFFFF',
+    outerBorderHex: '#0F766E',
+    innerBorderHex: '#0284C7',
+    kickerHex: '#0284C7',
+    headingHex: '#111827',
+    accentHex: '#0F766E',
+    sealHex: '#0284C7',
+  },
+};
+
+export const CERTIFICATE_THEME_LIST: CertificateThemeDefinition[] = [
+  CERTIFICATE_THEMES['classic-navy'],
+  CERTIFICATE_THEMES['emerald-academic'],
+  CERTIFICATE_THEMES['royal-slate'],
+  CERTIFICATE_THEMES['crimson-crest'],
+  CERTIFICATE_THEMES['teal-modern'],
+];
+
+export const DEFAULT_CERTIFICATE_ELEMENTS: CertificateElementsMap = {
+  orgLogo: { visible: true, x: 20, y: 17.5 },
+  orgName: { visible: true, x: 35.5, y: 23.5 },
+  kicker: { visible: true, x: 148.5, y: 24 },
+  title: { visible: true, x: 148.5, y: 35 },
+  subtitle: { visible: true, x: 148.5, y: 42 },
+  rankBadge: { visible: true, x: 148.5, y: 51 },
+  photo: { visible: true, x: 148.5, y: 76.5 },
+  awardedTo: { visible: true, x: 148.5, y: 106.5 },
+  recipientName: { visible: true, x: 148.5, y: 116.5 },
+  department: { visible: true, x: 148.5, y: 124.5 },
+  citation: { visible: true, x: 148.5, y: 135.5 },
+  seal: { visible: true, x: 148.5, y: 158 },
+  dateFooter: { visible: true, x: 58, y: 180 },
+  facilitatorBlock: { visible: true, x: 148.5, y: 180 },
+  principalBlock: { visible: true, x: 239, y: 180 },
+};
+
+export const CERTIFICATE_ELEMENT_META: ReadonlyArray<{
+  key: CertificateElementKey;
+  label: string;
+}> = [
+  { key: 'orgLogo', label: 'School / Company Logo' },
+  { key: 'orgName', label: 'Organization Name' },
+  { key: 'kicker', label: 'PRESENZA Header' },
+  { key: 'title', label: 'Certificate Title' },
+  { key: 'subtitle', label: 'Subtitle Line' },
+  { key: 'rankBadge', label: 'Rank Distinction Badge' },
+  { key: 'photo', label: 'Participant Photo' },
+  { key: 'awardedTo', label: 'Awarded-To Intro' },
+  { key: 'recipientName', label: 'Recipient Name' },
+  { key: 'department', label: 'Class / Dept & Divider' },
+  { key: 'citation', label: 'Citation Paragraph' },
+  { key: 'seal', label: 'Recognition Seal' },
+  { key: 'dateFooter', label: 'Date & Time Footer' },
+  { key: 'facilitatorBlock', label: 'Facilitator & Signature' },
+  { key: 'principalBlock', label: 'Principal & Signature' },
+];
+
+export const DEFAULT_CERTIFICATE_SETTINGS: CertificateSettings = {
+  themeId: 'classic-navy',
+  backgroundDataUrl: '',
+  backgroundOpacity: 22,
+  facilitatorSignatureDataUrl: '',
+  principalSignatureDataUrl: '',
+  elements: DEFAULT_CERTIFICATE_ELEMENTS,
+};
+
+export function mergeCertificateSettings(
+  partial?: Partial<CertificateSettings> | null
+): CertificateSettings {
+  const mergedElements = { ...DEFAULT_CERTIFICATE_ELEMENTS };
+  if (partial?.elements) {
+    (Object.keys(DEFAULT_CERTIFICATE_ELEMENTS) as CertificateElementKey[]).forEach(
+      (key) => {
+        const incomingEl = partial.elements?.[key];
+        if (incomingEl) {
+          mergedElements[key] = {
+            visible:
+              typeof incomingEl.visible === 'boolean'
+                ? incomingEl.visible
+                : DEFAULT_CERTIFICATE_ELEMENTS[key].visible,
+            x:
+              typeof incomingEl.x === 'number' && Number.isFinite(incomingEl.x)
+                ? Math.min(297, Math.max(0, incomingEl.x))
+                : DEFAULT_CERTIFICATE_ELEMENTS[key].x,
+            y:
+              typeof incomingEl.y === 'number' && Number.isFinite(incomingEl.y)
+                ? Math.min(210, Math.max(0, incomingEl.y))
+                : DEFAULT_CERTIFICATE_ELEMENTS[key].y,
+          };
+        }
+      }
+    );
+  }
+
+  const themeId =
+    partial?.themeId && partial.themeId in CERTIFICATE_THEMES
+      ? partial.themeId
+      : DEFAULT_CERTIFICATE_SETTINGS.themeId;
+
+  return {
+    themeId,
+    backgroundDataUrl: partial?.backgroundDataUrl || '',
+    backgroundOpacity:
+      typeof partial?.backgroundOpacity === 'number' &&
+      Number.isFinite(partial.backgroundOpacity)
+        ? Math.min(100, Math.max(0, partial.backgroundOpacity))
+        : DEFAULT_CERTIFICATE_SETTINGS.backgroundOpacity,
+    facilitatorSignatureDataUrl: partial?.facilitatorSignatureDataUrl || '',
+    principalSignatureDataUrl: partial?.principalSignatureDataUrl || '',
+    elements: mergedElements,
+  };
+}
 
 function detectImageFormat(dataUrl: string): 'JPEG' | 'PNG' | 'WEBP' {
   if (dataUrl.startsWith('data:image/png')) return 'PNG';
@@ -452,28 +718,121 @@ export function downloadRecapitulationPdf(
   doc.save(`presenza-recapitulation-${prefix}-${new Date().toISOString().slice(0, 10)}.pdf`);
 }
 
+function drawAspectContainedImage(
+  doc: jsPDF,
+  dataUrl: string,
+  centerX: number,
+  bottomY: number,
+  maxW: number,
+  maxH: number
+): void {
+  try {
+    const props = doc.getImageProperties(dataUrl);
+    const imgW = props.width || maxW;
+    const imgH = props.height || maxH;
+    const scale = Math.min(maxW / imgW, maxH / imgH);
+    const drawW = imgW * scale;
+    const drawH = imgH * scale;
+    const drawX = centerX - drawW / 2;
+    const drawY = bottomY - drawH;
+    doc.addImage(
+      dataUrl,
+      detectImageFormat(dataUrl),
+      drawX,
+      drawY,
+      drawW,
+      drawH
+    );
+  } catch {
+    // Skip malformed signature image gracefully
+  }
+}
+
 function drawCertificatePage(
   doc: jsPDF,
   record: AttendanceRecord,
   rank: number,
   totalParticipants: number,
   event?: EventRecord | null,
-  branding?: OrganizationBranding | null
+  branding?: OrganizationBranding | null,
+  certificateSettings?: Partial<CertificateSettings> | null
 ): void {
   const pageWidth = doc.internal.pageSize.getWidth(); // 297mm
   const pageHeight = doc.internal.pageSize.getHeight(); // 210mm
+  const settings = mergeCertificateSettings(certificateSettings);
+  const theme = CERTIFICATE_THEMES[settings.themeId];
+  const el = settings.elements;
 
-  // Cream / Crisp Parchment-White Background
-  doc.setFillColor(255, 255, 255);
+  // Theme Paper Background
+  doc.setFillColor(...theme.paperRgb);
   doc.rect(0, 0, pageWidth, pageHeight, 'F');
 
-  // Outer Navy Frame
-  doc.setDrawColor(15, 23, 42);
+  // Optional Background Photo with Admin-Controlled Transparency
+  if (settings.backgroundDataUrl && settings.backgroundOpacity > 0) {
+    try {
+      const props = doc.getImageProperties(settings.backgroundDataUrl);
+      const imgW = props.width || pageWidth;
+      const imgH = props.height || pageHeight;
+      const imgRatio = imgW / imgH;
+      const innerX = 10;
+      const innerY = 10;
+      const innerW = pageWidth - 20;
+      const innerH = pageHeight - 20;
+      const innerRatio = innerW / innerH;
+
+      let drawW = innerW;
+      let drawH = innerH;
+      let drawX = innerX;
+      let drawY = innerY;
+
+      if (imgRatio > innerRatio) {
+        drawH = innerH;
+        drawW = innerH * imgRatio;
+        drawX = innerX + (innerW - drawW) / 2;
+      } else {
+        drawW = innerW;
+        drawH = innerW / imgRatio;
+        drawY = innerY + (innerH - drawH) / 2;
+      }
+
+      const alpha = Math.min(1, Math.max(0, settings.backgroundOpacity / 100));
+      doc.saveGraphicsState();
+      doc.setGState(new GState({ opacity: alpha }));
+      doc.addImage(
+        settings.backgroundDataUrl,
+        detectImageFormat(settings.backgroundDataUrl),
+        drawX,
+        drawY,
+        drawW,
+        drawH
+      );
+      doc.restoreGraphicsState();
+      doc.setGState(new GState({ opacity: 1 }));
+
+      // Mask clean 10mm outer certificate margin
+      doc.setFillColor(...theme.paperRgb);
+      doc.rect(0, 0, pageWidth, 10, 'F');
+      doc.rect(0, pageHeight - 10, pageWidth, 10, 'F');
+      doc.rect(0, 0, 10, pageHeight, 'F');
+      doc.rect(pageWidth - 10, 0, 10, pageHeight, 'F');
+    } catch {
+      // Skip malformed background image gracefully
+    }
+  }
+
+  // Optional top accent bar for minimal/modern themes
+  if (theme.topBarRgb) {
+    doc.setFillColor(...theme.topBarRgb);
+    doc.rect(10, 10, pageWidth - 20, 3.2, 'F');
+  }
+
+  // Outer Frame
+  doc.setDrawColor(...theme.outerBorderRgb);
   doc.setLineWidth(1.8);
   doc.rect(10, 10, pageWidth - 20, pageHeight - 20, 'S');
 
-  // Inner Gold Trim Frame
-  doc.setDrawColor(180, 83, 9);
+  // Inner Trim Frame
+  doc.setDrawColor(...theme.innerBorderRgb);
   doc.setLineWidth(0.6);
   doc.rect(14, 14, pageWidth - 28, pageHeight - 28, 'S');
 
@@ -484,20 +843,20 @@ function drawCertificatePage(
     [10, pageHeight - 18],
     [pageWidth - 18, pageHeight - 18],
   ];
-  doc.setFillColor(15, 23, 42);
+  doc.setFillColor(...theme.cornerAccentRgb);
   corners.forEach(([cx, cy]) => {
     doc.rect(cx, cy, 8, 8, 'F');
   });
 
-  // Top-Left School / Company Logo & Name
+  // 1. Organization Logo
   const certOrgName = branding?.organizationName?.trim() || '';
-  if (branding?.logoDataUrl) {
+  if (el.orgLogo.visible && branding?.logoDataUrl) {
     try {
       doc.addImage(
         branding.logoDataUrl,
         detectImageFormat(branding.logoDataUrl),
-        20,
-        17.5,
+        el.orgLogo.x,
+        el.orgLogo.y,
         13,
         13
       );
@@ -505,203 +864,294 @@ function drawCertificatePage(
       // Skip malformed logo gracefully
     }
   }
-  if (certOrgName) {
-    const orgTextX = branding?.logoDataUrl ? 35.5 : 20;
+
+  // 2. Organization Name
+  if (el.orgName.visible && certOrgName) {
+    const orgTextX =
+      !el.orgLogo.visible && el.orgName.x === DEFAULT_CERTIFICATE_ELEMENTS.orgName.x
+        ? 20
+        : el.orgName.x;
     const orgLines = doc.splitTextToSize(certOrgName, 58).slice(0, 2);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
-    doc.setTextColor(15, 23, 42);
-    doc.text(orgLines, orgTextX, 23.5);
+    doc.setTextColor(...theme.headingRgb);
+    doc.text(orgLines, orgTextX, el.orgName.y);
   }
 
-  // Institutional Kicker
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
-  doc.setTextColor(29, 78, 216);
-  doc.text('PRESENZA', pageWidth / 2, 24, { align: 'center' });
-
-  // Main Certificate Heading
-  doc.setFont('times', 'bold');
-  doc.setFontSize(26);
-  doc.setTextColor(15, 23, 42);
-  doc.text('CERTIFICATE OF RECOGNITION', pageWidth / 2, 35, { align: 'center' });
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10);
-  doc.setTextColor(100, 116, 139);
-  doc.text('TOP 5 EARLIEST ARRIVAL HONORS', pageWidth / 2, 42, { align: 'center' });
-
-  // Rank Distinction Ribbon Box
-  const isPodium = rank <= 3;
-  doc.setFillColor(isPodium ? 254 : 239, isPodium ? 243 : 246, isPodium ? 199 : 255);
-  doc.setDrawColor(isPodium ? 180 : 29, isPodium ? 83 : 78, isPodium ? 9 : 216);
-  doc.setLineWidth(0.5);
-  const badgeW = 92;
-  const badgeX = (pageWidth - badgeW) / 2;
-  doc.roundedRect(badgeX, 46.5, badgeW, 9, 2, 2, 'FD');
-
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
-  if (isPodium) {
-    doc.setTextColor(146, 64, 14);
-  } else {
-    doc.setTextColor(30, 64, 175);
+  // 3. Institutional Kicker
+  if (el.kicker.visible) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(...theme.kickerRgb);
+    doc.text('PRESENZA', el.kicker.x, el.kicker.y, { align: 'center' });
   }
-  doc.text(
-    `RANK #${rank} · ${ordinalLabel(rank).toUpperCase()}`,
-    pageWidth / 2,
-    52.5,
-    { align: 'center' }
-  );
 
-  // Centered Participant Photo (horizontally centered, dedicated vertical band with no text overlap)
-  const textCenterX = pageWidth / 2;
-  const photoBoxSize = 34;
-  const photoX = (pageWidth - photoBoxSize) / 2;
-  const photoY = 59.5;
+  // 4. Main Certificate Heading
+  if (el.title.visible) {
+    doc.setFont('times', 'bold');
+    doc.setFontSize(26);
+    doc.setTextColor(...theme.headingRgb);
+    doc.text('CERTIFICATE OF RECOGNITION', el.title.x, el.title.y, {
+      align: 'center',
+    });
+  }
 
-  doc.setDrawColor(203, 213, 225);
-  doc.setFillColor(248, 250, 252);
-  doc.roundedRect(
-    photoX - 1.5,
-    photoY - 1.5,
-    photoBoxSize + 3,
-    photoBoxSize + 3,
-    2,
-    2,
-    'FD'
-  );
+  // 5. Subtitle
+  if (el.subtitle.visible) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(...theme.subtitleRgb);
+    doc.text('TOP 5 EARLIEST ARRIVAL HONORS', el.subtitle.x, el.subtitle.y, {
+      align: 'center',
+    });
+  }
 
-  if (record.photoDataUrl) {
-    try {
-      const format = detectImageFormat(record.photoDataUrl);
-      doc.addImage(
-        record.photoDataUrl,
-        format,
-        photoX,
-        photoY,
-        photoBoxSize,
-        photoBoxSize
-      );
-    } catch {
-      // Skip image if unsupported
+  // 6. Rank Distinction Ribbon Box
+  if (el.rankBadge.visible) {
+    const isPodium = rank <= 3;
+    const badgeW = 92;
+    const badgeH = 9;
+    const badgeX = el.rankBadge.x - badgeW / 2;
+    const badgeY = el.rankBadge.y - badgeH / 2;
+
+    if (isPodium) {
+      doc.setFillColor(...theme.podiumBadgeBgRgb);
+      doc.setDrawColor(...theme.podiumBadgeBorderRgb);
+    } else {
+      doc.setFillColor(239, 246, 255);
+      doc.setDrawColor(...theme.accentRgb);
     }
+    doc.setLineWidth(0.5);
+    doc.roundedRect(badgeX, badgeY, badgeW, badgeH, 2, 2, 'FD');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    if (isPodium) {
+      doc.setTextColor(...theme.podiumBadgeTextRgb);
+    } else {
+      doc.setTextColor(...theme.accentRgb);
+    }
+    doc.text(
+      `RANK #${rank} · ${ordinalLabel(rank).toUpperCase()}`,
+      el.rankBadge.x,
+      el.rankBadge.y + 1.5,
+      { align: 'center' }
+    );
   }
 
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
-  doc.setTextColor(100, 116, 139);
-  doc.text('Verified Check-In Photo', textCenterX, photoY + photoBoxSize + 6, {
-    align: 'center',
-  });
+  // 7. Participant Photo (centered on el.photo.x, el.photo.y)
+  if (el.photo.visible) {
+    const photoBoxSize = 34;
+    const photoX = el.photo.x - photoBoxSize / 2;
+    const photoY = el.photo.y - photoBoxSize / 2;
 
-  // Recipient Text Block (Centered cleanly below photo)
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10.5);
-  doc.setTextColor(71, 85, 105);
-  doc.text('This certificate is proudly awarded to', textCenterX, 106.5, {
-    align: 'center',
-  });
+    doc.setDrawColor(203, 213, 225);
+    doc.setFillColor(248, 250, 252);
+    doc.roundedRect(
+      photoX - 1.5,
+      photoY - 1.5,
+      photoBoxSize + 3,
+      photoBoxSize + 3,
+      2,
+      2,
+      'FD'
+    );
 
-  doc.setFont('times', 'bold');
-  doc.setFontSize(24);
-  doc.setTextColor(15, 23, 42);
+    if (record.photoDataUrl) {
+      try {
+        const format = detectImageFormat(record.photoDataUrl);
+        doc.addImage(
+          record.photoDataUrl,
+          format,
+          photoX,
+          photoY,
+          photoBoxSize,
+          photoBoxSize
+        );
+      } catch {
+        // Skip image if unsupported
+      }
+    }
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(...theme.subtitleRgb);
+    doc.text(
+      'Verified Check-In Photo',
+      el.photo.x,
+      photoY + photoBoxSize + 6,
+      { align: 'center' }
+    );
+  }
+
+  // 8. Awarded-To Intro
+  if (el.awardedTo.visible) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10.5);
+    doc.setTextColor(...theme.bodyRgb);
+    doc.text(
+      'This certificate is proudly awarded to',
+      el.awardedTo.x,
+      el.awardedTo.y,
+      { align: 'center' }
+    );
+  }
+
+  // 9. Recipient Name
   const nameLines = doc.splitTextToSize(record.fullName, 210).slice(0, 2);
-  const nameStartY = 116.5;
-  doc.text(nameLines, textCenterX, nameStartY, { align: 'center' });
+  const extraNameShift =
+    el.recipientName.visible && nameLines.length > 1 ? 8.5 : 0;
 
-  const afterNameY = nameStartY + (nameLines.length - 1) * 8.5;
+  if (el.recipientName.visible) {
+    doc.setFont('times', 'bold');
+    doc.setFontSize(24);
+    doc.setTextColor(...theme.headingRgb);
+    doc.text(nameLines, el.recipientName.x, el.recipientName.y, {
+      align: 'center',
+    });
+  }
 
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(11.5);
-  doc.setTextColor(29, 78, 216);
-  doc.text(record.classDepartment, textCenterX, afterNameY + 8, {
-    align: 'center',
-  });
+  // 10. Class / Department & Divider
+  const isDefaultDeptSpacing =
+    Math.abs(el.department.y - el.recipientName.y - 8) < 2;
+  const deptY = el.department.y + (isDefaultDeptSpacing ? extraNameShift : 0);
 
-  // Divider line under department
-  doc.setDrawColor(203, 213, 225);
-  doc.setLineWidth(0.4);
-  doc.line(85, afterNameY + 12, 212, afterNameY + 12);
+  if (el.department.visible) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11.5);
+    doc.setTextColor(...theme.accentRgb);
+    doc.text(record.classDepartment, el.department.x, deptY, {
+      align: 'center',
+    });
 
-  // Citation Paragraph (Centered below divider)
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10);
-  doc.setTextColor(51, 65, 85);
+    doc.setDrawColor(203, 213, 225);
+    doc.setLineWidth(0.4);
+    doc.line(el.department.x - 63.5, deptY + 4, el.department.x + 63.5, deptY + 4);
+  }
+
+  // 11. Citation Paragraph
+  const isDefaultCitationSpacing =
+    Math.abs(el.citation.y - el.recipientName.y - 19) < 2;
+  const citationY =
+    el.citation.y + (isDefaultCitationSpacing ? extraNameShift : 0);
   const citation = `For demonstrating outstanding punctuality and dedication by arriving among the earliest participants (#${rank} out of ${totalParticipants} attendees) at "${record.eventName}" on ${record.attendanceDate}, checking in at ${record.checkInTime} (${record.status}).`;
   const citationLines = doc.splitTextToSize(citation, 215).slice(0, 3);
-  const citationY = afterNameY + 19;
-  doc.text(citationLines, textCenterX, citationY, { align: 'center' });
 
-  const citationEndY = citationY + (citationLines.length - 1) * 4.5;
-  const sealY = Math.min(Math.max(citationEndY + 8.5, 156), 162);
+  if (el.citation.visible) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(...theme.bodyRgb);
+    doc.text(citationLines, el.citation.x, citationY, { align: 'center' });
+  }
 
-  // Recognition Seal Above Signature Row
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9);
-  doc.setTextColor(180, 83, 9);
-  doc.text(
-    `EARLY BIRD #${rank} · PRESENZA RECOGNITION AWARD`,
-    pageWidth / 2,
-    sealY,
-    { align: 'center' }
-  );
-
-  // Footer Signature & Timestamp Row (3 Columns: Check-In Time | Facilitators | Principal)
-  const footerY = 180;
-  doc.setDrawColor(148, 163, 184);
-  doc.setLineWidth(0.4);
+  // 12. Recognition Seal
+  if (el.seal.visible) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(...theme.sealRgb);
+    doc.text(
+      `EARLY BIRD #${rank} · PRESENZA RECOGNITION AWARD`,
+      el.seal.x,
+      el.seal.y,
+      { align: 'center' }
+    );
+  }
 
   const facilitatorText = event?.facilitators?.trim() || 'Session Facilitator';
   const principalText = event?.principalName?.trim() || 'School Principal';
 
-  // Left Footer: Verified Check-In Date & Time
-  doc.line(24, footerY, 92, footerY);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9);
-  doc.setTextColor(15, 23, 42);
-  doc.text(`${record.attendanceDate} · ${record.checkInTime}`, 58, footerY - 3, {
-    align: 'center',
-  });
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.5);
-  doc.setTextColor(100, 116, 139);
-  doc.text('Verified Attendance Date & Time', 58, footerY + 5, { align: 'center' });
+  // 13. Verified Check-In Date & Time Block
+  if (el.dateFooter.visible) {
+    const cx = el.dateFooter.x;
+    const cy = el.dateFooter.y;
+    doc.setDrawColor(148, 163, 184);
+    doc.setLineWidth(0.4);
+    doc.line(cx - 34, cy, cx + 34, cy);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(...theme.headingRgb);
+    doc.text(`${record.attendanceDate} · ${record.checkInTime}`, cx, cy - 3, {
+      align: 'center',
+    });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    doc.setTextColor(...theme.subtitleRgb);
+    doc.text('Verified Attendance Date & Time', cx, cy + 5, {
+      align: 'center',
+    });
+  }
 
-  // Center Footer: Facilitators
-  doc.line(114.5, footerY, 182.5, footerY);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9);
-  doc.setTextColor(15, 23, 42);
-  const facLines = doc.splitTextToSize(facilitatorText, 66).slice(0, 2);
-  const facStartY = footerY - 3 - (facLines.length - 1) * 4;
-  doc.text(facLines, 148.5, facStartY, { align: 'center' });
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.5);
-  doc.setTextColor(100, 116, 139);
-  doc.text('Facilitators', 148.5, footerY + 5, { align: 'center' });
+  // 14. Facilitator Block + Optional Digital Signature
+  if (el.facilitatorBlock.visible) {
+    const cx = el.facilitatorBlock.x;
+    const cy = el.facilitatorBlock.y;
+    doc.setDrawColor(148, 163, 184);
+    doc.setLineWidth(0.4);
+    doc.line(cx - 34, cy, cx + 34, cy);
 
-  // Right Footer: Principal Name
-  doc.line(205, footerY, 273, footerY);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9);
-  doc.setTextColor(15, 23, 42);
-  const principalLines = doc.splitTextToSize(principalText, 66).slice(0, 2);
-  const principalStartY = footerY - 3 - (principalLines.length - 1) * 4;
-  doc.text(principalLines, 239, principalStartY, { align: 'center' });
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.5);
-  doc.setTextColor(100, 116, 139);
-  doc.text('Principal', 239, footerY + 5, {
-    align: 'center',
-  });
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(...theme.headingRgb);
+    const facLines = doc.splitTextToSize(facilitatorText, 66).slice(0, 2);
+    const facStartY = cy - 3 - (facLines.length - 1) * 4;
+
+    if (settings.facilitatorSignatureDataUrl) {
+      drawAspectContainedImage(
+        doc,
+        settings.facilitatorSignatureDataUrl,
+        cx,
+        facStartY - 3.5,
+        44,
+        13
+      );
+    }
+
+    doc.text(facLines, cx, facStartY, { align: 'center' });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    doc.setTextColor(...theme.subtitleRgb);
+    doc.text('Facilitators', cx, cy + 5, { align: 'center' });
+  }
+
+  // 15. Principal Block + Optional Digital Signature
+  if (el.principalBlock.visible) {
+    const cx = el.principalBlock.x;
+    const cy = el.principalBlock.y;
+    doc.setDrawColor(148, 163, 184);
+    doc.setLineWidth(0.4);
+    doc.line(cx - 34, cy, cx + 34, cy);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(...theme.headingRgb);
+    const principalLines = doc.splitTextToSize(principalText, 66).slice(0, 2);
+    const principalStartY = cy - 3 - (principalLines.length - 1) * 4;
+
+    if (settings.principalSignatureDataUrl) {
+      drawAspectContainedImage(
+        doc,
+        settings.principalSignatureDataUrl,
+        cx,
+        principalStartY - 3.5,
+        44,
+        13
+      );
+    }
+
+    doc.text(principalLines, cx, principalStartY, { align: 'center' });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    doc.setTextColor(...theme.subtitleRgb);
+    doc.text('Principal', cx, cy + 5, { align: 'center' });
+  }
 }
 
 export function downloadBig5CertificatesPdf(
   records: AttendanceRecord[],
   eventTitle?: string,
   eventsById?: Map<string, EventRecord>,
-  branding?: OrganizationBranding | null
+  branding?: OrganizationBranding | null,
+  certificateSettings?: Partial<CertificateSettings> | null
 ): void {
   const top5 = records.slice(0, 5);
   if (top5.length === 0) return;
@@ -717,7 +1167,15 @@ export function downloadBig5CertificatesPdf(
       doc.addPage('a4', 'landscape');
     }
     const ev = eventsById?.get(rec.eventId) ?? null;
-    drawCertificatePage(doc, rec, idx + 1, records.length, ev, branding);
+    drawCertificatePage(
+      doc,
+      rec,
+      idx + 1,
+      records.length,
+      ev,
+      branding,
+      certificateSettings
+    );
   });
 
   const prefix = eventTitle ? slugify(eventTitle) : 'all-sessions';
@@ -729,7 +1187,8 @@ export function downloadSingleCertificatePdf(
   rank: number,
   totalParticipants: number,
   event?: EventRecord | null,
-  branding?: OrganizationBranding | null
+  branding?: OrganizationBranding | null,
+  certificateSettings?: Partial<CertificateSettings> | null
 ): void {
   const doc = new jsPDF({
     orientation: 'landscape',
@@ -737,7 +1196,15 @@ export function downloadSingleCertificatePdf(
     format: 'a4',
   });
 
-  drawCertificatePage(doc, record, rank, totalParticipants, event, branding);
+  drawCertificatePage(
+    doc,
+    record,
+    rank,
+    totalParticipants,
+    event,
+    branding,
+    certificateSettings
+  );
   doc.save(
     `presenza-certificate-rank-${rank}-${slugify(record.fullName)}.pdf`
   );

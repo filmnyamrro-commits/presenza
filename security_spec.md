@@ -7,7 +7,8 @@
 4. **Server Timestamp Enforcement**: `serverTimestamp` on `/attendances`, `createdAt`/`updatedAt` on `/events`, and `createdAt` on `/admins` must equal `request.time`.
 5. **Admin-Only Management & Email Allowlist**: Only verified administrators (`email_verified == true` and either registered in `/authorizedAdmins/{emailLower}`, legacy `/admins/{uid}`, or the initial bootstrap owner `rohantmr.lover@gmail.com`) may create/update/delete events, view/export/edit attendance logs, or manage authorized administrators.
 6. **Admin PII Isolation**: Ordinary authenticated Google users may only `get` their own `/authorizedAdmins/{theirLowercaseEmail}` document to verify eligibility and may NEVER `list` `/authorizedAdmins` or read other administrators' email addresses. Admins cannot delete their own active `/authorizedAdmins` entry.
-7. **Size & Schema Guarding**: Strict `hasAll` and `hasOnly` key checks, string `.size()` bounds, regex ID/email guards, and `photoDataUrl` <= 250,000 bytes.
+7. **Size & Schema Guarding**: Strict `hasAll` and `hasOnly` key checks, string `.size()` bounds, numeric range bounds (`backgroundOpacity` 0..100, certificate element coordinates within A4 landscape `0..297` × `0..210` mm), regex ID/email guards, and bounded image data URLs (`photoDataUrl` <= 250,000, certificate background <= 340,000, signatures <= 150,000 chars).
+8. **Admin-Only Certificate Studio & Dashboard Settings**: Only verified admins may read, list, create, update, or delete `/certificateSettings/{settingId}` and `/dashboardSettings/{settingId}`.
 
 ## 2. Dirty Dozen Adversarial Payloads
 1. Unauthenticated read/list on `/attendances` -> PERMISSION_DENIED
@@ -25,3 +26,5 @@
 13. Ordinary signed-in Google user attempting to `list` `/authorizedAdmins` or `create` their own `/authorizedAdmins/{self}` document -> PERMISSION_DENIED
 14. Ordinary signed-in Google user attempting to `get` another user's `/authorizedAdmins/{otherEmail}` document -> PERMISSION_DENIED
 15. Unauthenticated attendance submission or spoofed `participantEmail` on an event with `requireParticipantLogin: true` -> PERMISSION_DENIED
+16. Non-admin read or write on `/certificateSettings/{settingId}` or `/dashboardSettings/{settingId}` -> PERMISSION_DENIED
+17. Out-of-bounds certificate coordinates (`x > 297`, `y < 0`) or invalid `themeId` -> PERMISSION_DENIED

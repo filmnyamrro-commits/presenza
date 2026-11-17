@@ -254,6 +254,12 @@
           "maxLength": 450000,
           "description": "JPEG data URL used as the live dashboard portrait background."
         },
+        "backgroundOpacity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Background photo visibility percentage (0 to 100)."
+        },
         "updatedByUid": {
           "type": "string",
           "minLength": 1,
@@ -333,6 +339,69 @@
         }
       },
       "required": ["email", "displayName", "addedByUid", "addedByEmail", "createdAt"]
+    },
+    "CertificateSetting": {
+      "title": "CertificateSetting",
+      "description": "Administrator certificate theme, element visibility & position layout, background opacity, and digital signatures.",
+      "type": "object",
+      "properties": {
+        "themeId": {
+          "type": "string",
+          "enum": [
+            "classic-navy",
+            "emerald-academic",
+            "royal-slate",
+            "crimson-crest",
+            "teal-modern"
+          ],
+          "description": "Selected visual template theme for generated PDF certificates."
+        },
+        "backgroundDataUrl": {
+          "type": "string",
+          "maxLength": 340000,
+          "description": "Optional compressed background image data URL rendered behind the certificate content."
+        },
+        "backgroundOpacity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Certificate background photo opacity percentage (0 to 100)."
+        },
+        "facilitatorSignatureDataUrl": {
+          "type": "string",
+          "maxLength": 150000,
+          "description": "Optional transparent PNG/image data URL of the facilitator digital signature."
+        },
+        "principalSignatureDataUrl": {
+          "type": "string",
+          "maxLength": 150000,
+          "description": "Optional transparent PNG/image data URL of the principal digital signature."
+        },
+        "elements": {
+          "type": "object",
+          "description": "Visibility and (x, y) position in mm for each certificate element."
+        },
+        "updatedByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "themeId",
+        "backgroundDataUrl",
+        "backgroundOpacity",
+        "facilitatorSignatureDataUrl",
+        "principalSignatureDataUrl",
+        "elements",
+        "updatedByUid",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -359,6 +428,10 @@
     "/branding/{brandingId}": {
       "schema": { "$ref": "#/entities/OrganizationBranding" },
       "description": "School or company logo and display name controlled by administrators."
+    },
+    "/certificateSettings/{settingId}": {
+      "schema": { "$ref": "#/entities/CertificateSetting" },
+      "description": "Certificate theme, element positions/visibility, background opacity, and digital signatures managed by administrators."
     }
   }
 }
