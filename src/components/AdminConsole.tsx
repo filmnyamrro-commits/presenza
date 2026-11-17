@@ -16,6 +16,7 @@ import {
   LogOut,
   Mail,
   MapPin,
+  MessageSquare,
   Palette,
   Plus,
   QrCode,
@@ -65,8 +66,13 @@ import {
   type CertificateSettings,
   type EventCategory,
   type EventRecord,
+  type FeedbackConfig,
+  type FeedbackSubmissionRecord,
+  type IssuedCertificateRecord,
   OperationType,
   type OrganizationBranding,
+  type RecognitionCategory,
+  type RecognitionTemplateConfig,
 } from '../types';
 import { exportAttendanceCsv } from '../utils/csvExport';
 import { compressJpegBackground, compressLogoFile } from '../utils/imageCompress';
@@ -87,23 +93,49 @@ import {
   parse24hParts,
   parse24hTo12h,
 } from '../utils/dateTime';
+import {
+  DEFAULT_RECOGNITION_TEMPLATE,
+  mergeFeedbackConfig,
+  mergeRecognitionTemplate,
+} from '../utils/feedbackAndRecognitionDefaults';
+import AdminFeedbackModule from './AdminFeedbackModule';
+import AdminRecognitionModule from './AdminRecognitionModule';
 import CertificateCustomizerModal from './CertificateCustomizerModal';
 import EventQrThumbnail from './EventQrThumbnail';
 import QrPosterModal from './QrPosterModal';
+
+export type AdminSectionTab = 'attendance' | 'feedback' | 'certificates';
 
 interface AdminConsoleProps {
   user: User | null;
   authReady: boolean;
   branding?: OrganizationBranding | null;
+  activeSection?: AdminSectionTab;
+  onChangeSection?: (section: AdminSectionTab) => void;
   onOpenCheckIn: (eventId: string) => void;
+  onOpenFeedbackForm?: (eventId: string) => void;
 }
 
 export default function AdminConsole({
   user,
   authReady,
   branding,
+  activeSection,
+  onChangeSection,
   onOpenCheckIn,
+  onOpenFeedbackForm,
 }: AdminConsoleProps) {
+  const [internalSection, setInternalSection] =
+    useState<AdminSectionTab>('attendance');
+  const currentSection = activeSection ?? internalSection;
+  const setCurrentSection = (next: AdminSectionTab) => {
+    if (onChangeSection) {
+      onChangeSection(next);
+    } else {
+      setInternalSection(next);
+    }
+  };
+
   const [checkingAdmin, setCheckingAdmin] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [authError, setAuthError] = useState<AuthErrorDetails | null>(null);
@@ -179,11 +211,29 @@ export default function AdminConsole({
   );
   const [evFacilitators, setEvFacilitators] = useState('');
   const [evPrincipalName, setEvPrincipalName] = useState('');
+  const [evTheme, setEvTheme] = useState('');
+  const [evTopic, setEvTopic] = useState('');
   const [evRequireParticipantLogin, setEvRequireParticipantLogin] =
     useState(false);
   const [timeFormatMode, setTimeFormatMode] = useState<'24h' | '12h'>('24h');
   const [savingEvent, setSavingEvent] = useState(false);
   const [eventFormError, setEventFormError] = useState<string | null>(null);
+
+  // Module 1 (Feedback & Evaluation) & Module 2 (Certificates & Recognition) State
+  const [feedbackConfigsById, setFeedbackConfigsById] = useState<
+    Map<string, FeedbackConfig>
+  >(() => new Map());
+  const [feedbackSubmissions, setFeedbackSubmissions] = useState<
+    FeedbackSubmissionRecord[]
+  >([]);
+  const [recognitionCategories, setRecognitionCategories] = useState<
+    RecognitionCategory[]
+  >([]);
+  const [recognitionTemplate, setRecognitionTemplate] =
+    useState<RecognitionTemplateConfig>(DEFAULT_RECOGNITION_TEMPLATE);
+  const [issuedCertificates, setIssuedCertificates] = useState<
+    IssuedCertificateRecord[]
+  >([]);
 
   // Authorized Administrators management state
   const [authorizedAdmins, setAuthorizedAdmins] = useState<
@@ -272,6 +322,11 @@ export default function AdminConsole({
       setEvents([]);
       setAttendances([]);
       setAuthorizedAdmins([]);
+      setFeedbackConfigsById(new Map());
+      setFeedbackSubmissions([]);
+      setRecognitionCategories([]);
+      setRecognitionTemplate(DEFAULT_RECOGNITION_TEMPLATE);
+      setIssuedCertificates([]);
       setLoadingData(false);
       return;
     }
@@ -381,12 +436,115 @@ export default function AdminConsole({
       }
     );
 
+    const unsubFeedbackConfigs = onSnapshot(
+      collection(db, 'feedbackConfigs'),
+      (snap) => {
+        const map = new Map<string, FeedbackConfig>();
+        snap.docs.forEach((d) => {
+          map.set(
+            d.id,
+            mergeFeedbackConfig(d.data() as Partial<FeedbackConfig>, d.id)
+          );
+        });
+        setFeedbackConfigsById(map);
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, 'feedbackConfigs');
+      }
+    );
+
+    const unsubFeedbackSubmissions = onSnapshot(
+      collection(db, 'feedbackSubmissions'),
+      (snap) => {
+        const list: FeedbackSubmissionRecord[] = snap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<FeedbackSubmissionRecord, 'id'>),
+        }));
+        list.sort((a, b) => {
+          const at = a.serverTimestamp?.toMillis?.() ?? 0;
+          const bt = b.serverTimestamp?.toMillis?.() ?? 0;
+          return bt - at;
+        });
+        setFeedbackSubmissions(list);
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, 'feedbackSubmissions');
+      }
+    );
+
+    const unsubRecCategories = onSnapshot(
+      collection(db, 'recognitionCategories'),
+      (snap) => {
+        const list: RecognitionCategory[] = snap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<RecognitionCategory, 'id'>),
+        }));
+        list.sort(
+          (a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name)
+        );
+        setRecognitionCategories(list);
+      },
+      (error) => {
+        handleFirestoreError(
+          error,
+          OperationType.LIST,
+          'recognitionCategories'
+        );
+      }
+    );
+
+    const unsubRecTemplate = onSnapshot(
+      doc(db, 'recognitionTemplates', 'default'),
+      (snap) => {
+        if (snap.exists()) {
+          setRecognitionTemplate(
+            mergeRecognitionTemplate(
+              snap.data() as Partial<RecognitionTemplateConfig>
+            )
+          );
+        } else {
+          setRecognitionTemplate(DEFAULT_RECOGNITION_TEMPLATE);
+        }
+      },
+      (error) => {
+        handleFirestoreError(
+          error,
+          OperationType.GET,
+          'recognitionTemplates/default'
+        );
+      }
+    );
+
+    const unsubCertificates = onSnapshot(
+      collection(db, 'certificates'),
+      (snap) => {
+        const list: IssuedCertificateRecord[] = snap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<IssuedCertificateRecord, 'id'>),
+        }));
+        list.sort((a, b) => {
+          const at = a.createdAt?.toMillis?.() ?? 0;
+          const bt = b.createdAt?.toMillis?.() ?? 0;
+          return bt - at;
+        });
+        setIssuedCertificates(list);
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, 'certificates');
+      }
+    );
+
     return () => {
       unsubEvents();
       unsubAttendances();
       unsubBgSetting();
       unsubCertSettings();
       unsubAdmins();
+      unsubFeedbackConfigs();
+      unsubFeedbackSubmissions();
+      unsubRecCategories();
+      unsubRecTemplate();
+      unsubCertificates();
       if (bgOpacitySaveTimerRef.current !== null) {
         window.clearTimeout(bgOpacitySaveTimerRef.current);
       }
@@ -665,6 +823,8 @@ export default function AdminConsole({
     );
     setEvFacilitators('');
     setEvPrincipalName('');
+    setEvTheme('');
+    setEvTopic('');
     setEvRequireParticipantLogin(false);
     setEventFormError(null);
     setShowEventModal(true);
@@ -686,6 +846,8 @@ export default function AdminConsole({
     );
     setEvFacilitators(ev.facilitators || '');
     setEvPrincipalName(ev.principalName || '');
+    setEvTheme(ev.theme || '');
+    setEvTopic(ev.topic || '');
     setEvRequireParticipantLogin(Boolean(ev.requireParticipantLogin));
     setEventFormError(null);
     setShowEventModal(true);
@@ -770,6 +932,8 @@ export default function AdminConsole({
     ).slice(0, 400);
     const facilitators = evFacilitators.trim().slice(0, 200);
     const principalName = evPrincipalName.trim().slice(0, 120);
+    const theme = evTheme.trim().slice(0, 120);
+    const topic = evTopic.trim().slice(0, 200);
 
     try {
       if (editingEvent) {
@@ -787,6 +951,8 @@ export default function AdminConsole({
           consentText: consentStatement,
           facilitators,
           principalName,
+          theme,
+          topic,
           requireParticipantLogin: evRequireParticipantLogin,
           updatedAt: serverTimestamp(),
         });
@@ -805,6 +971,8 @@ export default function AdminConsole({
           consentText: consentStatement,
           facilitators,
           principalName,
+          theme,
+          topic,
           requireParticipantLogin: evRequireParticipantLogin,
           status: 'active' as const,
           createdByUid: user.uid,
@@ -1246,6 +1414,80 @@ export default function AdminConsole({
         </div>
       </div>
 
+      {/* Admin Module Switcher Tabs */}
+      <nav
+        className="flex flex-wrap items-center gap-2 bg-white border border-slate-200 rounded-2xl p-1.5"
+        aria-label="Administrator modules"
+      >
+        <button
+          type="button"
+          onClick={() => setCurrentSection('attendance')}
+          className={`min-h-[42px] px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-colors inline-flex items-center gap-2 ${
+            currentSection === 'attendance'
+              ? 'bg-slate-900 text-white'
+              : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+          }`}
+        >
+          <Users className="w-4 h-4" />
+          <span>Events &amp; Attendance ({events.length})</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setCurrentSection('feedback')}
+          className={`min-h-[42px] px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-colors inline-flex items-center gap-2 ${
+            currentSection === 'feedback'
+              ? 'bg-blue-700 text-white'
+              : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+          }`}
+        >
+          <MessageSquare className="w-4 h-4" />
+          <span>Feedback &amp; Evaluation ({feedbackSubmissions.length})</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setCurrentSection('certificates')}
+          className={`min-h-[42px] px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-colors inline-flex items-center gap-2 ${
+            currentSection === 'certificates'
+              ? 'bg-amber-600 text-white'
+              : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+          }`}
+        >
+          <Award className="w-4 h-4" />
+          <span>Certificates &amp; Recognition ({issuedCertificates.length})</span>
+        </button>
+      </nav>
+
+      {currentSection === 'feedback' && (
+        <AdminFeedbackModule
+          user={user}
+          events={events}
+          feedbackConfigsById={feedbackConfigsById}
+          feedbackSubmissions={feedbackSubmissions}
+          onOpenFeedbackForm={(eventId) => {
+            if (onOpenFeedbackForm) {
+              onOpenFeedbackForm(eventId);
+            }
+          }}
+        />
+      )}
+
+      {currentSection === 'certificates' && (
+        <AdminRecognitionModule
+          user={user}
+          events={events}
+          attendances={attendances}
+          feedbackSubmissions={feedbackSubmissions}
+          branding={branding}
+          categories={recognitionCategories}
+          templateConfig={recognitionTemplate}
+          certificates={issuedCertificates}
+        />
+      )}
+
+      {currentSection === 'attendance' && (
+        <>
       {/* School / Company Top-Left Branding Bar */}
       <section className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5">
         <input
@@ -2113,6 +2355,8 @@ export default function AdminConsole({
           </div>
         )}
       </section>
+        </>
+      )}
 
       {/* Create / Edit Session Modal */}
       {showEventModal && (
@@ -2484,6 +2728,44 @@ export default function AdminConsole({
                   </div>
                 </div>
 
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label
+                      htmlFor="ev-theme"
+                      className="block text-xs font-semibold text-slate-700 mb-1"
+                    >
+                      Event Theme (for Recognition &amp; Feedback)
+                    </label>
+                    <input
+                      id="ev-theme"
+                      type="text"
+                      maxLength={120}
+                      value={evTheme}
+                      onChange={(e) => setEvTheme(e.target.value)}
+                      placeholder="e.g. Future-Ready Pedagogy"
+                      className="w-full min-h-[40px] px-3 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-600"
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="ev-topic"
+                      className="block text-xs font-semibold text-slate-700 mb-1"
+                    >
+                      Session / Topic (for Feedback &amp; Certificates)
+                    </label>
+                    <input
+                      id="ev-topic"
+                      type="text"
+                      maxLength={200}
+                      value={evTopic}
+                      onChange={(e) => setEvTopic(e.target.value)}
+                      placeholder="e.g. Active Learning & Formative Assessment"
+                      className="w-full min-h-[40px] px-3 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-600"
+                    />
+                  </div>
+                </div>
+
                 <div>
                   <label
                     htmlFor="ev-dept-label"
@@ -2611,6 +2893,7 @@ export default function AdminConsole({
           eventAttendances={attendances.filter((a) => a.eventId === qrEvent.id)}
           onClose={() => setQrEvent(null)}
           onOpenCheckIn={onOpenCheckIn}
+          onOpenFeedback={onOpenFeedbackForm}
           onPreviewPhoto={(rec) => setLightboxRecord(rec)}
           dashboardBgUrl={dashboardBgUrl}
           dashboardBgOpacity={dashboardBgOpacity}

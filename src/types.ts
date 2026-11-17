@@ -26,6 +26,8 @@ export interface EventRecord {
   facilitators?: string;
   principalName?: string;
   requireParticipantLogin?: boolean;
+  theme?: string;
+  topic?: string;
 }
 
 export interface AttendanceRecord {
@@ -116,6 +118,136 @@ export interface CertificateSettings {
   facilitatorSignatureDataUrl: string;
   principalSignatureDataUrl: string;
   elements: CertificateElementsMap;
+}
+
+// Module 1: Participant Feedback & Evaluation
+export interface FeedbackRatingCriterion {
+  id: string;
+  label: string;
+  active: boolean;
+  required: boolean;
+}
+
+export interface FeedbackStatementCategory {
+  id: string;
+  name: string;
+  sentiment: 'positive' | 'improvement';
+}
+
+export interface FeedbackStatement {
+  id: string;
+  categoryId: string;
+  text: string;
+  active: boolean;
+  required: boolean;
+}
+
+export interface FeedbackConfig {
+  eventId: string; // 'default' or specific event ID
+  introNote: string;
+  requireWrittenComment: boolean;
+  ratingCriteria: FeedbackRatingCriterion[];
+  categories: FeedbackStatementCategory[];
+  statements: FeedbackStatement[];
+}
+
+export interface FeedbackRatingEntry {
+  criterionId: string;
+  label: string;
+  score: number; // 1..5
+}
+
+export interface FeedbackStatementSelection {
+  statementId: string;
+  categoryId: string;
+  categoryName: string;
+  sentiment: 'positive' | 'improvement';
+  text: string;
+}
+
+export interface FeedbackSubmissionRecord {
+  id: string;
+  eventId: string;
+  eventTitle: string;
+  eventDate: string;
+  eventVenue: string;
+  facilitatorName: string;
+  sessionTopic: string;
+  ratings: FeedbackRatingEntry[];
+  averageRating: number;
+  selectedStatements: FeedbackStatementSelection[];
+  writtenComment: string;
+  participantName?: string;
+  participantDepartment?: string;
+  participantEmail?: string;
+  attendanceId?: string;
+  clientSubmissionToken: string;
+  serverTimestamp: Timestamp;
+}
+
+// Module 2: Certificates & Recognition
+export interface RecognitionCategory {
+  id: string;
+  name: string;
+  description: string;
+  sortOrder: number;
+  createdByUid: string;
+  createdAt?: Timestamp;
+  updatedAt?: Timestamp;
+}
+
+export type RecognitionFontFamily = 'times' | 'helvetica' | 'courier';
+export type RecognitionOrientation = 'landscape' | 'portrait';
+
+export interface RecognitionTemplateConfig {
+  orientation: RecognitionOrientation;
+  title: string;
+  subtitle: string;
+  wordingTemplate: string;
+  fontFamily: RecognitionFontFamily;
+  primaryColor: string; // Hex e.g. #0F172A
+  accentColor: string; // Hex e.g. #B45309
+  paperColor: string; // Hex e.g. #FFFFFF
+  customLogoDataUrl: string;
+  signatureDataUrl: string;
+  signatoryLabel: string;
+  showTopic: boolean;
+  showFacilitator: boolean;
+  showCertificateId: boolean;
+}
+
+export interface IssuedCertificateRecord {
+  id: string;
+  certificateNumber: string;
+  dedupeKey: string;
+  eventId: string;
+  eventTitle: string;
+  eventDate: string;
+  eventVenue: string;
+  eventTheme: string;
+  eventTopic: string;
+  facilitators: string;
+  organizerName: string;
+  attendanceId: string;
+  participantName: string;
+  participantDepartment: string;
+  participantEmail: string;
+  categoryId: string;
+  categoryName: string;
+  issueDate: string; // YYYY-MM-DD
+  selectionMethod: 'manual' | 'evaluation';
+  orientation: RecognitionOrientation;
+  certificateTitle: string;
+  certificateSubtitle: string;
+  wordingText: string;
+  fontFamily: RecognitionFontFamily;
+  primaryColor: string;
+  accentColor: string;
+  paperColor: string;
+  signatoryLabel: string;
+  issuedByUid: string;
+  issuedByEmail: string;
+  createdAt: Timestamp;
 }
 
 export enum OperationType {

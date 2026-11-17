@@ -6,13 +6,14 @@
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
-import AdminConsole from './components/AdminConsole';
+import AdminConsole, { type AdminSectionTab } from './components/AdminConsole';
 import ErrorBoundary from './components/ErrorBoundary';
 import ParticipantCheckIn from './components/ParticipantCheckIn';
+import ParticipantFeedback from './components/ParticipantFeedback';
 import { auth, db, handleFirestoreError } from './firebase';
 import { OperationType, type OrganizationBranding } from './types';
 
-type ViewMode = 'checkin' | 'admin';
+type ViewMode = 'checkin' | 'feedback' | 'admin';
 
 function readInitialEventId(): string | null {
   const params = new URLSearchParams(window.location.search);
@@ -20,12 +21,29 @@ function readInitialEventId(): string | null {
   return raw ? raw.trim() : null;
 }
 
+function readAdminSectionFromLocation(): AdminSectionTab {
+  if (window.location.hash === '#admin/feedback') return 'feedback';
+  if (window.location.hash === '#admin/certificates') return 'certificates';
+  return 'attendance';
+}
+
 function isAdminLocation(): boolean {
   const path = window.location.pathname.replace(/\/+$/, '');
-  return window.location.hash === '#admin' || path === '/admin';
+  return (
+    window.location.hash.startsWith('#admin') ||
+    path === '/admin'
+  );
+}
+
+function isFeedbackQueryLocation(): boolean {
+  const params = new URLSearchParams(window.location.search);
+  return params.get('view') === 'feedback' || window.location.hash === '#feedback';
 }
 
 function readInitialView(): ViewMode {
+  if (isFeedbackQueryLocation()) {
+    return 'feedback';
+  }
   if (isAdminLocation() && !readInitialEventId()) {
     return 'admin';
   }
@@ -34,6 +52,9 @@ function readInitialView(): ViewMode {
 
 export default function App() {
   const [view, setView] = useState<ViewMode>(readInitialView);
+  const [adminSection, setAdminSection] = useState<AdminSectionTab>(
+    readAdminSectionFromLocation
+  );
   const [requestedEventId, setRequestedEventId] = useState<string | null>(
     readInitialEventId
   );
@@ -41,7 +62,7 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false);
   const [branding, setBranding] = useState<OrganizationBranding | null>(null);
 
-  // When a participant enters via QR link (/?event=<id>), hide all Admin menu & sign-in controls
+  // When a participant enters via QR link (/?event=<id> or /?view=feedback&event=<id>), hide Admin menu controls
   const isQrParticipantView = Boolean(requestedEventId);
 
   useEffect(() => {
@@ -80,8 +101,11 @@ export default function App() {
     const syncFromLocation = () => {
       const ev = readInitialEventId();
       setRequestedEventId(ev);
-      if (isAdminLocation() && !ev) {
+      if (isFeedbackQueryLocation()) {
+        setView('feedback');
+      } else if (isAdminLocation() && !ev) {
         setView('admin');
+        setAdminSection(readAdminSectionFromLocation());
       } else {
         setView('checkin');
       }
@@ -94,10 +118,26 @@ export default function App() {
     };
   }, []);
 
-  const navigateToView = (nextView: ViewMode) => {
+  const navigateToView = (
+    nextView: ViewMode,
+    nextAdminSection?: AdminSectionTab
+  ) => {
     setView(nextView);
     if (nextView === 'admin') {
-      window.history.replaceState(null, '', '/#admin');
+      const targetSec = nextAdminSection ?? adminSection;
+      setAdminSection(targetSec);
+      const hash =
+        targetSec === 'feedback'
+          ? '#admin/feedback'
+          : targetSec === 'certificates'
+          ? '#admin/certificates'
+          : '#admin';
+      window.history.replaceState(null, '', `/${hash}`);
+    } else if (nextView === 'feedback') {
+      const search = requestedEventId
+        ? `?view=feedback&event=${encodeURIComponent(requestedEventId)}`
+        : '?view=feedback';
+      window.history.replaceState(null, '', `/${search}`);
     } else {
       const search = requestedEventId
         ? `?event=${encodeURIComponent(requestedEventId)}`
@@ -113,20 +153,33 @@ export default function App() {
     window.history.replaceState(null, '', nextUrl);
   };
 
+  const handleOpenFeedbackEvent = (eventId?: string | null) => {
+    const targetId = eventId ?? null;
+    setRequestedEventId(targetId);
+    setView('feedback');
+    const nextUrl = targetId
+      ? `/?view=feedback&event=${encodeURIComponent(targetId)}`
+      : '/?view=feedback';
+    window.history.replaceState(null, '', nextUrl);
+  };
+
   const orgName = branding?.organizationName?.trim() || '';
   const logoUrl = branding?.logoDataUrl || '';
 
   return (
     <ErrorBoundary>
       <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
-        {/* Top Bar: Top-left school/company logo & name + PRESENZA branding */}
+        {/* Top Bar */}
         <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-6">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
             <a
               href="/"
               onClick={(e) => {
                 e.preventDefault();
-                navigateToView('checkin');
+                if (!isQrParticipantView) {
+                  setRequestedEventId(null);
+                }
+                navigateToView(view === 'feedback' && isQrParticipantView ? 'feedback' : 'checkin');
               }}
               className="flex items-center gap-3 min-w-0 shrink-0"
             >
@@ -140,7 +193,7 @@ export default function App() {
               <div className="min-w-0 flex flex-col leading-tight">
                 {orgName ? (
                   <>
-                    <span className="font-display text-sm sm:text-base font-extrabold tracking-tight text-slate-900 truncate max-w-[200px] sm:max-w-[280px]">
+                    <span className="font-display text-sm sm:text-base font-extrabold tracking-tight text-slate-900 truncate max-w-[180px] sm:max-w-[260px]">
                       {orgName}
                     </span>
                     <span className="text-[11px] font-bold tracking-wider text-blue-700 uppercase">
@@ -156,15 +209,34 @@ export default function App() {
             </a>
 
             {isQrParticipantView ? (
-              <div className="flex items-center shrink-0">
-                <span className="text-xs font-medium text-slate-500 whitespace-nowrap shrink-0">
-                  Participant Check-In
-                </span>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleSelectEventId(requestedEventId)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
+                    view === 'checkin'
+                      ? 'bg-slate-900 text-white'
+                      : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  Check-In
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleOpenFeedbackEvent(requestedEventId)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
+                    view === 'feedback'
+                      ? 'bg-blue-700 text-white'
+                      : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  Feedback &amp; Evaluation
+                </button>
               </div>
             ) : (
               <>
                 <nav
-                  className="hidden sm:flex items-center gap-6 text-sm font-medium"
+                  className="hidden md:flex items-center gap-5 text-sm font-medium"
                   aria-label="Primary navigation"
                 >
                   <button
@@ -180,9 +252,31 @@ export default function App() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => navigateToView('admin')}
+                    onClick={() => navigateToView('feedback')}
                     className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
-                      view === 'admin'
+                      view === 'feedback'
+                        ? 'border-blue-700 text-slate-900 font-semibold'
+                        : 'border-transparent text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Feedback &amp; Evaluation
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigateToView('admin', 'certificates')}
+                    className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
+                      view === 'admin' && adminSection === 'certificates'
+                        ? 'border-amber-600 text-slate-900 font-semibold'
+                        : 'border-transparent text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Certificates &amp; Recognition
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigateToView('admin', 'attendance')}
+                    className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
+                      view === 'admin' && adminSection !== 'certificates'
                         ? 'border-blue-700 text-slate-900 font-semibold'
                         : 'border-transparent text-slate-600 hover:text-slate-900'
                     }`}
@@ -192,10 +286,10 @@ export default function App() {
                 </nav>
 
                 <div className="flex items-center shrink-0">
-                  {view === 'checkin' ? (
+                  {view !== 'admin' ? (
                     <button
                       type="button"
-                      onClick={() => navigateToView('admin')}
+                      onClick={() => navigateToView('admin', 'attendance')}
                       className="min-h-[40px] px-4 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition-colors whitespace-nowrap shrink-0"
                     >
                       {user ? 'Admin Console' : 'Admin Sign In'}
@@ -213,6 +307,45 @@ export default function App() {
               </>
             )}
           </div>
+
+          {/* Mobile Quick Nav Bar when not in QR lock */}
+          {!isQrParticipantView && (
+            <div className="md:hidden border-t border-slate-100 px-3 py-1.5 flex items-center gap-1.5 overflow-x-auto bg-white">
+              <button
+                type="button"
+                onClick={() => navigateToView('checkin')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap ${
+                  view === 'checkin'
+                    ? 'bg-slate-900 text-white'
+                    : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                Check-In
+              </button>
+              <button
+                type="button"
+                onClick={() => navigateToView('feedback')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap ${
+                  view === 'feedback'
+                    ? 'bg-blue-700 text-white'
+                    : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                Feedback &amp; Evaluation
+              </button>
+              <button
+                type="button"
+                onClick={() => navigateToView('admin', 'certificates')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap ${
+                  view === 'admin' && adminSection === 'certificates'
+                    ? 'bg-amber-600 text-white'
+                    : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                Certificates &amp; Recognition
+              </button>
+            </div>
+          )}
         </header>
 
         <main className="flex-1">
@@ -221,8 +354,25 @@ export default function App() {
               requestedEventId={requestedEventId}
               user={user}
               onSelectEventId={handleSelectEventId}
+              onGoToFeedback={(eventId) => handleOpenFeedbackEvent(eventId)}
               onGoToAdmin={
-                isQrParticipantView ? undefined : () => navigateToView('admin')
+                isQrParticipantView
+                  ? undefined
+                  : () => navigateToView('admin', 'attendance')
+              }
+            />
+          ) : view === 'feedback' ? (
+            <ParticipantFeedback
+              requestedEventId={requestedEventId}
+              user={user}
+              onSelectEventId={(eventId) => handleOpenFeedbackEvent(eventId)}
+              onGoToCheckIn={(eventId) =>
+                handleSelectEventId(eventId ?? null)
+              }
+              onGoToAdmin={
+                isQrParticipantView
+                  ? undefined
+                  : () => navigateToView('admin', 'feedback')
               }
             />
           ) : (
@@ -230,7 +380,19 @@ export default function App() {
               user={user}
               authReady={authReady}
               branding={branding}
+              activeSection={adminSection}
+              onChangeSection={(sec) => {
+                setAdminSection(sec);
+                const hash =
+                  sec === 'feedback'
+                    ? '#admin/feedback'
+                    : sec === 'certificates'
+                    ? '#admin/certificates'
+                    : '#admin';
+                window.history.replaceState(null, '', `/${hash}`);
+              }}
               onOpenCheckIn={(eventId) => handleSelectEventId(eventId)}
+              onOpenFeedbackForm={(eventId) => handleOpenFeedbackEvent(eventId)}
             />
           )}
         </main>
@@ -241,7 +403,7 @@ export default function App() {
               {orgName ? `${orgName} · ` : ''}PRESENZA · Workshops, Seminars &amp; Professional Development
             </span>
             <span>
-              QR attendance check-in (email login optional per session)
+              QR attendance check-in &amp; evaluation (participant login optional)
             </span>
           </div>
         </footer>

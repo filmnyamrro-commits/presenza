@@ -17,6 +17,10 @@ service cloud.firestore {
         email.matches('^[a-z0-9._%+\\-]+@[a-z0-9.\\-]+\\.[a-z]{2,}$');
     }
 
+    function isValidHexColor(color) {
+      return color is string && color.size() == 7 && color.matches('^#[0-9a-fA-F]{6}$');
+    }
+
     function incoming() {
       return request.resource.data;
     }
@@ -82,7 +86,8 @@ service cloud.firestore {
           'startTime', 'lateCutoffTime', 'cutoffTimestamp', 'status',
           'createdByUid', 'createdAt', 'updatedAt',
           'departmentLabel', 'departmentPresets', 'consentText',
-          'facilitators', 'principalName', 'requireParticipantLogin'
+          'facilitators', 'principalName', 'requireParticipantLogin',
+          'theme', 'topic'
         ]) &&
         data.title is string && data.title.size() >= 2 && data.title.size() <= 140 &&
         data.category is string && data.category.size() >= 1 && data.category.size() <= 80 &&
@@ -101,7 +106,9 @@ service cloud.firestore {
         (!('consentText' in data) || (data.consentText is string && data.consentText.size() <= 400)) &&
         (!('facilitators' in data) || (data.facilitators is string && data.facilitators.size() <= 200)) &&
         (!('principalName' in data) || (data.principalName is string && data.principalName.size() <= 120)) &&
-        (!('requireParticipantLogin' in data) || data.requireParticipantLogin is bool);
+        (!('requireParticipantLogin' in data) || data.requireParticipantLogin is bool) &&
+        (!('theme' in data) || (data.theme is string && data.theme.size() <= 120)) &&
+        (!('topic' in data) || (data.topic is string && data.topic.size() <= 200));
     }
 
     function isValidAttendance(data) {
@@ -225,6 +232,159 @@ service cloud.firestore {
         data.updatedAt is timestamp;
     }
 
+    function isValidFeedbackConfig(data) {
+      return data.keys().hasAll([
+          'eventId', 'introNote', 'requireWrittenComment',
+          'ratingCriteria', 'categories', 'statements',
+          'updatedByUid', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'eventId', 'introNote', 'requireWrittenComment',
+          'ratingCriteria', 'categories', 'statements',
+          'updatedByUid', 'updatedAt'
+        ]) &&
+        isValidId(data.eventId) &&
+        data.introNote is string && data.introNote.size() <= 400 &&
+        data.requireWrittenComment is bool &&
+        data.ratingCriteria is list && data.ratingCriteria.size() >= 1 && data.ratingCriteria.size() <= 12 &&
+        data.ratingCriteria[0] is map &&
+        data.categories is list && data.categories.size() >= 1 && data.categories.size() <= 12 &&
+        data.categories[0] is map &&
+        data.statements is list && data.statements.size() <= 40 &&
+        (data.statements.size() == 0 || data.statements[0] is map) &&
+        isValidId(data.updatedByUid) &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidFeedbackSubmission(data) {
+      return data.keys().hasAll([
+          'eventId', 'eventTitle', 'eventDate', 'eventVenue',
+          'facilitatorName', 'sessionTopic', 'ratings', 'averageRating',
+          'selectedStatements', 'writtenComment', 'clientSubmissionToken',
+          'serverTimestamp'
+        ]) &&
+        data.keys().hasOnly([
+          'eventId', 'eventTitle', 'eventDate', 'eventVenue',
+          'facilitatorName', 'sessionTopic', 'ratings', 'averageRating',
+          'selectedStatements', 'writtenComment',
+          'participantName', 'participantDepartment', 'participantEmail', 'attendanceId',
+          'clientSubmissionToken', 'serverTimestamp'
+        ]) &&
+        isValidId(data.eventId) &&
+        data.eventTitle is string && data.eventTitle.size() >= 2 && data.eventTitle.size() <= 140 &&
+        data.eventDate is string && data.eventDate.size() == 10 && data.eventDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+        data.eventVenue is string && data.eventVenue.size() <= 120 &&
+        data.facilitatorName is string && data.facilitatorName.size() <= 200 &&
+        data.sessionTopic is string && data.sessionTopic.size() <= 200 &&
+        data.ratings is list && data.ratings.size() >= 0 && data.ratings.size() <= 12 &&
+        (data.ratings.size() == 0 || data.ratings[0] is map) &&
+        data.averageRating is number && data.averageRating >= 0 && data.averageRating <= 5 &&
+        data.selectedStatements is list && data.selectedStatements.size() <= 40 &&
+        (data.selectedStatements.size() == 0 || data.selectedStatements[0] is map) &&
+        data.writtenComment is string && data.writtenComment.size() <= 1500 &&
+        (!('participantName' in data) || (data.participantName is string && data.participantName.size() <= 100)) &&
+        (!('participantDepartment' in data) || (data.participantDepartment is string && data.participantDepartment.size() <= 100)) &&
+        (!('participantEmail' in data) || data.participantEmail == '' || isValidEmail(data.participantEmail)) &&
+        (!('attendanceId' in data) || data.attendanceId == '' || isValidId(data.attendanceId)) &&
+        isValidId(data.clientSubmissionToken) &&
+        data.serverTimestamp is timestamp;
+    }
+
+    function isValidRecognitionCategory(data) {
+      return data.keys().hasAll(['name', 'description', 'sortOrder', 'createdByUid', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['name', 'description', 'sortOrder', 'createdByUid', 'createdAt', 'updatedAt']) &&
+        data.name is string && data.name.size() >= 2 && data.name.size() <= 100 &&
+        data.description is string && data.description.size() <= 300 &&
+        data.sortOrder is number && data.sortOrder >= 0 && data.sortOrder <= 1000 &&
+        isValidId(data.createdByUid) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidRecognitionTemplate(data) {
+      return data.keys().hasAll([
+          'orientation', 'title', 'subtitle', 'wordingTemplate',
+          'fontFamily', 'primaryColor', 'accentColor', 'paperColor',
+          'customLogoDataUrl', 'signatureDataUrl', 'signatoryLabel',
+          'showTopic', 'showFacilitator', 'showCertificateId',
+          'updatedByUid', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'orientation', 'title', 'subtitle', 'wordingTemplate',
+          'fontFamily', 'primaryColor', 'accentColor', 'paperColor',
+          'customLogoDataUrl', 'signatureDataUrl', 'signatoryLabel',
+          'showTopic', 'showFacilitator', 'showCertificateId',
+          'updatedByUid', 'updatedAt'
+        ]) &&
+        data.orientation in ['landscape', 'portrait'] &&
+        data.title is string && data.title.size() >= 2 && data.title.size() <= 120 &&
+        data.subtitle is string && data.subtitle.size() <= 140 &&
+        data.wordingTemplate is string && data.wordingTemplate.size() >= 5 && data.wordingTemplate.size() <= 600 &&
+        data.fontFamily in ['times', 'helvetica', 'courier'] &&
+        isValidHexColor(data.primaryColor) &&
+        isValidHexColor(data.accentColor) &&
+        isValidHexColor(data.paperColor) &&
+        isValidOptionalImage(data.customLogoDataUrl, 320000) &&
+        isValidOptionalImage(data.signatureDataUrl, 150000) &&
+        data.signatoryLabel is string && data.signatoryLabel.size() <= 120 &&
+        data.showTopic is bool &&
+        data.showFacilitator is bool &&
+        data.showCertificateId is bool &&
+        isValidId(data.updatedByUid) &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidIssuedCertificate(data) {
+      return data.keys().hasAll([
+          'certificateNumber', 'dedupeKey', 'eventId', 'eventTitle', 'eventDate',
+          'eventVenue', 'eventTheme', 'eventTopic', 'facilitators', 'organizerName',
+          'attendanceId', 'participantName', 'participantDepartment', 'participantEmail',
+          'categoryId', 'categoryName', 'issueDate', 'selectionMethod',
+          'orientation', 'certificateTitle', 'certificateSubtitle', 'wordingText',
+          'fontFamily', 'primaryColor', 'accentColor', 'paperColor', 'signatoryLabel',
+          'issuedByUid', 'issuedByEmail', 'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'certificateNumber', 'dedupeKey', 'eventId', 'eventTitle', 'eventDate',
+          'eventVenue', 'eventTheme', 'eventTopic', 'facilitators', 'organizerName',
+          'attendanceId', 'participantName', 'participantDepartment', 'participantEmail',
+          'categoryId', 'categoryName', 'issueDate', 'selectionMethod',
+          'orientation', 'certificateTitle', 'certificateSubtitle', 'wordingText',
+          'fontFamily', 'primaryColor', 'accentColor', 'paperColor', 'signatoryLabel',
+          'issuedByUid', 'issuedByEmail', 'createdAt'
+        ]) &&
+        data.certificateNumber is string && data.certificateNumber.size() >= 4 && data.certificateNumber.size() <= 40 &&
+        data.dedupeKey is string && data.dedupeKey.size() >= 4 && data.dedupeKey.size() <= 240 &&
+        isValidId(data.eventId) &&
+        data.eventTitle is string && data.eventTitle.size() >= 2 && data.eventTitle.size() <= 140 &&
+        data.eventDate is string && data.eventDate.size() == 10 &&
+        data.eventVenue is string && data.eventVenue.size() <= 120 &&
+        data.eventTheme is string && data.eventTheme.size() <= 120 &&
+        data.eventTopic is string && data.eventTopic.size() <= 200 &&
+        data.facilitators is string && data.facilitators.size() <= 200 &&
+        data.organizerName is string && data.organizerName.size() <= 120 &&
+        (data.attendanceId == '' || isValidId(data.attendanceId)) &&
+        data.participantName is string && data.participantName.size() >= 2 && data.participantName.size() <= 100 &&
+        data.participantDepartment is string && data.participantDepartment.size() <= 100 &&
+        (data.participantEmail == '' || isValidEmail(data.participantEmail)) &&
+        isValidId(data.categoryId) &&
+        data.categoryName is string && data.categoryName.size() >= 2 && data.categoryName.size() <= 100 &&
+        data.issueDate is string && data.issueDate.size() == 10 &&
+        data.selectionMethod in ['manual', 'evaluation'] &&
+        data.orientation in ['landscape', 'portrait'] &&
+        data.certificateTitle is string && data.certificateTitle.size() >= 2 && data.certificateTitle.size() <= 120 &&
+        data.certificateSubtitle is string && data.certificateSubtitle.size() <= 140 &&
+        data.wordingText is string && data.wordingText.size() >= 5 && data.wordingText.size() <= 700 &&
+        data.fontFamily in ['times', 'helvetica', 'courier'] &&
+        isValidHexColor(data.primaryColor) &&
+        isValidHexColor(data.accentColor) &&
+        isValidHexColor(data.paperColor) &&
+        data.signatoryLabel is string && data.signatoryLabel.size() <= 120 &&
+        isValidId(data.issuedByUid) &&
+        isValidEmail(data.issuedByEmail) &&
+        data.createdAt is timestamp;
+    }
+
     match /events/{eventId} {
       allow get: if isValidId(eventId) && (existing().status == 'active' || isAdmin());
       allow list: if existing().status == 'active' || isAdmin();
@@ -244,7 +404,8 @@ service cloud.firestore {
           'title', 'category', 'description', 'venue', 'eventDate',
           'startTime', 'lateCutoffTime', 'cutoffTimestamp', 'status', 'updatedAt',
           'departmentLabel', 'departmentPresets', 'consentText',
-          'facilitators', 'principalName', 'requireParticipantLogin'
+          'facilitators', 'principalName', 'requireParticipantLogin',
+          'theme', 'topic'
         ]);
       allow delete: if isAdmin() && isValidId(eventId);
     }
@@ -370,6 +531,98 @@ service cloud.firestore {
           'elements', 'updatedByUid', 'updatedAt'
         ]);
       allow delete: if isAdmin() && isValidId(settingId);
+    }
+
+    match /feedbackConfigs/{configId} {
+      allow get: if isValidId(configId);
+      allow list: if isAdmin();
+      allow create: if isAdmin() &&
+        isValidId(configId) &&
+        isValidFeedbackConfig(incoming()) &&
+        incoming().updatedByUid == request.auth.uid &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() &&
+        isValidId(configId) &&
+        isValidFeedbackConfig(incoming()) &&
+        incoming().updatedByUid == request.auth.uid &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'introNote', 'requireWrittenComment',
+          'ratingCriteria', 'categories', 'statements',
+          'updatedByUid', 'updatedAt'
+        ]);
+      allow delete: if isAdmin() && isValidId(configId);
+    }
+
+    match /feedbackSubmissions/{submissionId} {
+      allow get: if isAdmin() && isValidId(submissionId);
+      allow list: if isAdmin();
+      allow create: if isValidId(submissionId) &&
+        isValidFeedbackSubmission(incoming()) &&
+        incoming().serverTimestamp == request.time &&
+        exists(/databases/$(database)/documents/events/$(incoming().eventId)) &&
+        get(/databases/$(database)/documents/events/$(incoming().eventId)).data.status == 'active' &&
+        incoming().eventTitle == get(/databases/$(database)/documents/events/$(incoming().eventId)).data.title;
+      allow update: if false;
+      allow delete: if isAdmin() && isValidId(submissionId);
+    }
+
+    match /recognitionCategories/{categoryId} {
+      allow get: if isAdmin() && isValidId(categoryId);
+      allow list: if isAdmin();
+      allow create: if isAdmin() &&
+        isValidId(categoryId) &&
+        isValidRecognitionCategory(incoming()) &&
+        incoming().createdByUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() &&
+        isValidId(categoryId) &&
+        isValidRecognitionCategory(incoming()) &&
+        incoming().createdByUid == existing().createdByUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'name', 'description', 'sortOrder', 'updatedAt'
+        ]);
+      allow delete: if isAdmin() && isValidId(categoryId);
+    }
+
+    match /recognitionTemplates/{templateId} {
+      allow get: if isAdmin() && isValidId(templateId);
+      allow list: if isAdmin();
+      allow create: if isAdmin() &&
+        isValidId(templateId) &&
+        isValidRecognitionTemplate(incoming()) &&
+        incoming().updatedByUid == request.auth.uid &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() &&
+        isValidId(templateId) &&
+        isValidRecognitionTemplate(incoming()) &&
+        incoming().updatedByUid == request.auth.uid &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'orientation', 'title', 'subtitle', 'wordingTemplate',
+          'fontFamily', 'primaryColor', 'accentColor', 'paperColor',
+          'customLogoDataUrl', 'signatureDataUrl', 'signatoryLabel',
+          'showTopic', 'showFacilitator', 'showCertificateId',
+          'updatedByUid', 'updatedAt'
+        ]);
+      allow delete: if isAdmin() && isValidId(templateId);
+    }
+
+    match /certificates/{certificateId} {
+      allow get: if isAdmin() && isValidId(certificateId);
+      allow list: if isAdmin();
+      allow create: if isAdmin() &&
+        isValidId(certificateId) &&
+        !exists(/databases/$(database)/documents/certificates/$(certificateId)) &&
+        isValidIssuedCertificate(incoming()) &&
+        incoming().issuedByUid == request.auth.uid &&
+        incoming().issuedByEmail == userEmailLower() &&
+        incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isAdmin() && isValidId(certificateId);
     }
   }
 }

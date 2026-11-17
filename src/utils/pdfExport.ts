@@ -7,7 +7,9 @@ import type {
   CertificateSettings,
   CertificateThemeId,
   EventRecord,
+  IssuedCertificateRecord,
   OrganizationBranding,
+  RecognitionTemplateConfig,
 } from '../types';
 
 export interface CertificateThemeDefinition {
@@ -1208,4 +1210,339 @@ export function downloadSingleCertificatePdf(
   doc.save(
     `presenza-certificate-rank-${rank}-${slugify(record.fullName)}.pdf`
   );
+}
+
+function hexToRgbTuple(hex: string, fallback: [number, number, number]): [number, number, number] {
+  const clean = hex.trim();
+  const match = /^#?([0-9a-fA-F]{6})$/.exec(clean);
+  if (!match) return fallback;
+  const num = parseInt(match[1], 16);
+  return [(num >> 16) & 255, (num >> 8) & 255, num & 255];
+}
+
+export interface RecognitionPdfRenderOptions {
+  logoDataUrl?: string;
+  signatureDataUrl?: string;
+  showTopic?: boolean;
+  showFacilitator?: boolean;
+  showCertificateId?: boolean;
+}
+
+function drawRecognitionCertificatePage(
+  doc: jsPDF,
+  cert: IssuedCertificateRecord,
+  options: RecognitionPdfRenderOptions
+): void {
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const isPortrait = cert.orientation === 'portrait' || pageH > pageW;
+  const centerX = pageW / 2;
+
+  const paperRgb = hexToRgbTuple(cert.paperColor, [255, 255, 255]);
+  const primaryRgb = hexToRgbTuple(cert.primaryColor, [15, 23, 42]);
+  const accentRgb = hexToRgbTuple(cert.accentColor, [180, 83, 9]);
+  const font = cert.fontFamily || 'times';
+
+  // Paper background
+  doc.setFillColor(...paperRgb);
+  doc.rect(0, 0, pageW, pageH, 'F');
+
+  // Double border frame + subtle top accent strip
+  doc.setFillColor(...primaryRgb);
+  doc.rect(10, 10, pageW - 20, 3.2, 'F');
+
+  doc.setDrawColor(...primaryRgb);
+  doc.setLineWidth(1.6);
+  doc.rect(10, 10, pageW - 20, pageH - 20, 'S');
+
+  doc.setDrawColor(...accentRgb);
+  doc.setLineWidth(0.55);
+  doc.rect(14, 14, pageW - 28, pageH - 28, 'S');
+
+  // Corner squares
+  doc.setFillColor(...accentRgb);
+  [
+    [10, 10],
+    [pageW - 17, 10],
+    [10, pageH - 17],
+    [pageW - 17, pageH - 17],
+  ].forEach(([cx, cy]) => {
+    doc.rect(cx, cy, 7, 7, 'F');
+  });
+
+  // Top Header: Organization logo & name
+  let cursorY = isPortrait ? 30 : 25;
+  if (options.logoDataUrl) {
+    try {
+      const logoSize = isPortrait ? 16 : 14;
+      doc.addImage(
+        options.logoDataUrl,
+        detectImageFormat(options.logoDataUrl),
+        centerX - logoSize / 2,
+        cursorY - 6,
+        logoSize,
+        logoSize
+      );
+      cursorY += logoSize + 3;
+    } catch {
+      // Ignore malformed logo gracefully
+    }
+  }
+
+  const orgDisplay = cert.organizerName?.trim() || 'PRESENZA';
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9.5);
+  doc.setTextColor(...accentRgb);
+  doc.text(orgDisplay.toUpperCase(), centerX, cursorY, { align: 'center' });
+  cursorY += isPortrait ? 12 : 9.5;
+
+  // Certificate Title
+  const maxTitleW = pageW - 44;
+  doc.setFont(font, 'bold');
+  doc.setFontSize(isPortrait ? 24 : 26);
+  doc.setTextColor(...primaryRgb);
+  const titleLines = doc.splitTextToSize(
+    cert.certificateTitle || 'CERTIFICATE OF RECOGNITION',
+    maxTitleW
+  ).slice(0, 2);
+  doc.text(titleLines, centerX, cursorY, { align: 'center' });
+  cursorY += titleLines.length * 9 + 2;
+
+  // Subtitle
+  if (cert.certificateSubtitle?.trim()) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9.5);
+    doc.setTextColor(100, 116, 139);
+    const subLines = doc.splitTextToSize(
+      cert.certificateSubtitle.toUpperCase(),
+      maxTitleW
+    ).slice(0, 2);
+    doc.text(subLines, centerX, cursorY, { align: 'center' });
+    cursorY += subLines.length * 4.8 + 5;
+  } else {
+    cursorY += 4;
+  }
+
+  // Category Recognition Ribbon
+  const catText = cert.categoryName.toUpperCase();
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  const ribbonW = Math.min(pageW - 48, Math.max(76, doc.getTextWidth(catText) + 18));
+  const ribbonH = 9.5;
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(...accentRgb);
+  doc.setLineWidth(0.55);
+  doc.roundedRect(centerX - ribbonW / 2, cursorY, ribbonW, ribbonH, 2, 2, 'FD');
+  doc.setTextColor(...accentRgb);
+  doc.text(catText, centerX, cursorY + 6.3, { align: 'center' });
+  cursorY += ribbonH + (isPortrait ? 16 : 11);
+
+  // "Proudly presented to"
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(10.5);
+  doc.setTextColor(71, 85, 105);
+  doc.text('This recognition award is proudly presented to', centerX, cursorY, {
+    align: 'center',
+  });
+  cursorY += isPortrait ? 13 : 11;
+
+  // Recipient Name
+  doc.setFont(font, 'bold');
+  doc.setFontSize(isPortrait ? 25 : 27);
+  doc.setTextColor(...primaryRgb);
+  const recNameLines = doc.splitTextToSize(cert.participantName, maxTitleW).slice(0, 2);
+  doc.text(recNameLines, centerX, cursorY, { align: 'center' });
+  cursorY += recNameLines.length * 10 + 1;
+
+  // Department & horizontal accent divider
+  if (cert.participantDepartment?.trim()) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(...accentRgb);
+    doc.text(cert.participantDepartment, centerX, cursorY, { align: 'center' });
+    cursorY += 4.5;
+  }
+  doc.setDrawColor(203, 213, 225);
+  doc.setLineWidth(0.45);
+  doc.line(centerX - 58, cursorY, centerX + 58, cursorY);
+  cursorY += isPortrait ? 12 : 9;
+
+  // Wording Paragraph
+  const maxBodyW = pageW - (isPortrait ? 44 : 74);
+  doc.setFont(font === 'times' ? 'times' : 'helvetica', 'normal');
+  doc.setFontSize(isPortrait ? 11.5 : 11);
+  doc.setTextColor(51, 65, 85);
+  const wordingLines = doc.splitTextToSize(cert.wordingText, maxBodyW).slice(0, 5);
+  doc.text(wordingLines, centerX, cursorY, {
+    align: 'center',
+    lineHeightFactor: 1.4,
+  });
+  cursorY += wordingLines.length * 6.4 + 4;
+
+  // Event Context Details (Topic / Theme / Facilitator)
+  const metaParts: string[] = [];
+  if (cert.eventTheme?.trim()) metaParts.push(`Theme: ${cert.eventTheme.trim()}`);
+  if (options.showTopic !== false && cert.eventTopic?.trim()) {
+    metaParts.push(`Topic: ${cert.eventTopic.trim()}`);
+  }
+  if (metaParts.length > 0) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(...primaryRgb);
+    const metaLines = doc.splitTextToSize(metaParts.join('   ·   '), maxBodyW).slice(0, 2);
+    doc.text(metaLines, centerX, cursorY, { align: 'center' });
+    cursorY += metaLines.length * 4.5 + 3;
+  }
+
+  // Footer Signature & Metadata Row
+  const footerLineY = pageH - (isPortrait ? 38 : 30);
+  const sideOffset = isPortrait ? 46 : 78;
+  const showFac = options.showFacilitator !== false && Boolean(cert.facilitators?.trim());
+
+  // Left block: Issue Date & Location
+  const leftX = showFac ? centerX - sideOffset : centerX - (isPortrait ? 42 : 56);
+  doc.setDrawColor(148, 163, 184);
+  doc.setLineWidth(0.4);
+  doc.line(leftX - 30, footerLineY, leftX + 30, footerLineY);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(...primaryRgb);
+  doc.text(cert.issueDate || cert.eventDate, leftX, footerLineY - 3, {
+    align: 'center',
+  });
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.setTextColor(100, 116, 139);
+  doc.text('Date Issued', leftX, footerLineY + 4.5, { align: 'center' });
+
+  // Center or Right block: Signatory + Digital Signature
+  const sigX = showFac ? centerX : centerX + (isPortrait ? 42 : 56);
+  doc.setDrawColor(148, 163, 184);
+  doc.line(sigX - 32, footerLineY, sigX + 32, footerLineY);
+  if (options.signatureDataUrl) {
+    drawAspectContainedImage(doc, options.signatureDataUrl, sigX, footerLineY - 2, 46, 14);
+  }
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(...primaryRgb);
+  const sigLabelLines = doc
+    .splitTextToSize(cert.signatoryLabel || 'Authorized Coordinator', 62)
+    .slice(0, 2);
+  doc.text(sigLabelLines, sigX, footerLineY + 4.5, { align: 'center' });
+
+  // Right block (if facilitator shown)
+  if (showFac) {
+    const rightX = centerX + sideOffset;
+    doc.setDrawColor(148, 163, 184);
+    doc.line(rightX - 30, footerLineY, rightX + 30, footerLineY);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(...primaryRgb);
+    const facLines = doc.splitTextToSize(cert.facilitators, 58).slice(0, 2);
+    doc.text(facLines, rightX, footerLineY - 3 - (facLines.length - 1) * 3.5, {
+      align: 'center',
+    });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(100, 116, 139);
+    doc.text('Facilitator / Speaker', rightX, footerLineY + 4.5, {
+      align: 'center',
+    });
+  }
+
+  // Bottom Certificate Verification ID Strip
+  if (options.showCertificateId !== false) {
+    doc.setFont('courier', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text(
+      `Certificate ID: ${cert.certificateNumber}   ·   Event: ${cert.eventTitle} (${cert.eventDate})`,
+      centerX,
+      pageH - 16.5,
+      { align: 'center' }
+    );
+  }
+}
+
+function buildRecognitionPdfDoc(
+  certs: IssuedCertificateRecord[],
+  template?: Partial<RecognitionTemplateConfig> | null,
+  branding?: OrganizationBranding | null
+): jsPDF {
+  const firstOrientation =
+    certs[0]?.orientation || template?.orientation || 'landscape';
+  const doc = new jsPDF({
+    orientation: firstOrientation,
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  const renderOptions: RecognitionPdfRenderOptions = {
+    logoDataUrl: template?.customLogoDataUrl || branding?.logoDataUrl || '',
+    signatureDataUrl: template?.signatureDataUrl || '',
+    showTopic: template?.showTopic ?? true,
+    showFacilitator: template?.showFacilitator ?? true,
+    showCertificateId: template?.showCertificateId ?? true,
+  };
+
+  certs.forEach((cert, idx) => {
+    const orient = cert.orientation === 'portrait' ? 'portrait' : 'landscape';
+    if (idx > 0) {
+      doc.addPage('a4', orient);
+    }
+    drawRecognitionCertificatePage(doc, cert, renderOptions);
+  });
+
+  return doc;
+}
+
+export function downloadRecognitionCertificatesPdf(
+  certs: IssuedCertificateRecord[],
+  template?: Partial<RecognitionTemplateConfig> | null,
+  branding?: OrganizationBranding | null,
+  filenamePrefix?: string
+): void {
+  if (certs.length === 0) return;
+  const doc = buildRecognitionPdfDoc(certs, template, branding);
+  const slug =
+    filenamePrefix
+      ? slugify(filenamePrefix)
+      : certs.length === 1
+      ? `${slugify(certs[0].categoryName)}-${slugify(certs[0].participantName)}`
+      : `${slugify(certs[0].eventTitle)}-recognition-certificates`;
+  doc.save(`presenza-recognition-${slug}-${new Date().toISOString().slice(0, 10)}.pdf`);
+}
+
+export function printRecognitionCertificatesPdf(
+  certs: IssuedCertificateRecord[],
+  template?: Partial<RecognitionTemplateConfig> | null,
+  branding?: OrganizationBranding | null
+): void {
+  if (certs.length === 0) return;
+  const doc = buildRecognitionPdfDoc(certs, template, branding);
+  doc.autoPrint();
+  const blobUrl = URL.createObjectURL(doc.output('blob'));
+  const iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.right = '0';
+  iframe.style.bottom = '0';
+  iframe.style.width = '0';
+  iframe.style.height = '0';
+  iframe.style.border = '0';
+  iframe.setAttribute('aria-hidden', 'true');
+  iframe.src = blobUrl;
+  iframe.onload = () => {
+    try {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+    } finally {
+      window.setTimeout(() => {
+        if (iframe.parentNode) {
+          iframe.parentNode.removeChild(iframe);
+        }
+        URL.revokeObjectURL(blobUrl);
+      }, 60_000);
+    }
+  };
+  document.body.appendChild(iframe);
 }

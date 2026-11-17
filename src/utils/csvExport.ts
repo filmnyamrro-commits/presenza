@@ -1,4 +1,4 @@
-import type { AttendanceRecord } from '../types';
+import type { AttendanceRecord, FeedbackSubmissionRecord } from '../types';
 
 function escapeCsvCell(value: string): string {
   const normalized = value.replace(/\r?\n/g, ' ');
@@ -41,7 +41,7 @@ export function exportAttendanceCsv(
     ].join(',');
   });
 
-  const csvContent = [headers.join(','), ...rows].join('\n');
+  const csvContent = `\uFEFF${[headers.join(','), ...rows].join('\n')}`;
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
@@ -53,6 +53,93 @@ export function exportAttendanceCsv(
   link.setAttribute(
     'download',
     `${safeName || 'presenza-attendance'}-${new Date().toISOString().slice(0, 10)}.csv`
+  );
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+export function exportFeedbackCsv(
+  submissions: FeedbackSubmissionRecord[],
+  filenamePrefix: string
+): void {
+  // Collect all distinct criterion labels across included submissions for clean tabular breakdown
+  const criterionLabels: string[] = [];
+  const seenLabels = new Set<string>();
+  for (const sub of submissions) {
+    for (const r of sub.ratings) {
+      if (r.label && !seenLabels.has(r.label)) {
+        seenLabels.add(r.label);
+        criterionLabels.push(r.label);
+      }
+    }
+  }
+
+  const headers = [
+    'Event Title',
+    'Event Date',
+    'Location / Venue',
+    'Facilitator / Speaker',
+    'Session / Topic',
+    'Participant Name',
+    'Class / Department',
+    'Participant Email',
+    'Average Rating (1-5)',
+    ...criterionLabels.map((lbl) => `Rating: ${lbl}`),
+    'Positive Feedback Selected',
+    'Improvement Suggestions Selected',
+    'Written Comments & Recommendations',
+    'Submitted At (ISO)',
+  ];
+
+  const rows = submissions.map((sub) => {
+    const serverIso = sub.serverTimestamp?.toDate
+      ? sub.serverTimestamp.toDate().toISOString()
+      : '';
+    const ratingMap = new Map(sub.ratings.map((r) => [r.label, r.score]));
+    const positiveTexts = sub.selectedStatements
+      .filter((s) => s.sentiment === 'positive')
+      .map((s) => s.text)
+      .join(' | ');
+    const improvementTexts = sub.selectedStatements
+      .filter((s) => s.sentiment === 'improvement')
+      .map((s) => s.text)
+      .join(' | ');
+
+    return [
+      escapeCsvCell(sub.eventTitle),
+      escapeCsvCell(sub.eventDate),
+      escapeCsvCell(sub.eventVenue),
+      escapeCsvCell(sub.facilitatorName || ''),
+      escapeCsvCell(sub.sessionTopic || ''),
+      escapeCsvCell(sub.participantName || 'Anonymous'),
+      escapeCsvCell(sub.participantDepartment || ''),
+      escapeCsvCell(sub.participantEmail || ''),
+      escapeCsvCell(sub.averageRating.toFixed(2)),
+      ...criterionLabels.map((lbl) => {
+        const val = ratingMap.get(lbl);
+        return escapeCsvCell(typeof val === 'number' ? String(val) : '');
+      }),
+      escapeCsvCell(positiveTexts),
+      escapeCsvCell(improvementTexts),
+      escapeCsvCell(sub.writtenComment || ''),
+      escapeCsvCell(serverIso),
+    ].join(',');
+  });
+
+  const csvContent = `\uFEFF${[headers.join(','), ...rows].join('\n')}`;
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  const safeName = filenamePrefix
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+  link.href = url;
+  link.setAttribute(
+    'download',
+    `${safeName || 'presenza-feedback'}-${new Date().toISOString().slice(0, 10)}.csv`
   );
   document.body.appendChild(link);
   link.click();

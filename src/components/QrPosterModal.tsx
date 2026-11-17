@@ -23,6 +23,7 @@ interface QrPosterModalProps {
   eventAttendances: AttendanceRecord[];
   onClose: () => void;
   onOpenCheckIn: (eventId: string) => void;
+  onOpenFeedback?: (eventId: string) => void;
   onPreviewPhoto: (record: AttendanceRecord) => void;
   dashboardBgUrl?: string | null;
   dashboardBgOpacity?: number;
@@ -39,6 +40,7 @@ export default function QrPosterModal({
   eventAttendances,
   onClose,
   onOpenCheckIn,
+  onOpenFeedback,
   onPreviewPhoto,
   dashboardBgUrl,
   dashboardBgOpacity = 25,
@@ -49,16 +51,19 @@ export default function QrPosterModal({
   onRemoveBackground,
   branding,
 }: QrPosterModalProps) {
+  const [qrMode, setQrMode] = useState<'checkin' | 'feedback'>('checkin');
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [copied, setCopied] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const bgFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const checkInUrl = `${window.location.origin}/?event=${encodeURIComponent(event.id)}`;
+  const feedbackUrl = `${window.location.origin}/?view=feedback&event=${encodeURIComponent(event.id)}`;
+  const activeQrUrl = qrMode === 'feedback' ? feedbackUrl : checkInUrl;
 
   useEffect(() => {
     let active = true;
-    QRCode.toDataURL(checkInUrl, {
+    QRCode.toDataURL(activeQrUrl, {
       width: 640,
       margin: 2,
       color: {
@@ -76,7 +81,7 @@ export default function QrPosterModal({
     return () => {
       active = false;
     };
-  }, [checkInUrl]);
+  }, [activeQrUrl]);
 
   const counts = useMemo(() => {
     const total = eventAttendances.length;
@@ -87,7 +92,7 @@ export default function QrPosterModal({
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(checkInUrl);
+      await navigator.clipboard.writeText(activeQrUrl);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -99,7 +104,8 @@ export default function QrPosterModal({
     if (!qrDataUrl) return;
     const link = document.createElement('a');
     link.href = qrDataUrl;
-    link.download = `${event.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-qr.png`;
+    const suffix = qrMode === 'feedback' ? 'feedback-qr' : 'checkin-qr';
+    link.download = `${event.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${suffix}.png`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -189,33 +195,72 @@ export default function QrPosterModal({
         <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 overflow-y-auto lg:overflow-hidden">
           {/* Left Column: QR Code & Sharing Actions */}
           <div className="lg:col-span-5 border-b lg:border-b-0 lg:border-r border-slate-200 flex flex-col justify-between bg-slate-50/50">
+            <div className="px-5 pt-4 flex justify-center">
+              <div
+                className="inline-flex rounded-xl border border-slate-200 bg-slate-100 p-1"
+                role="tablist"
+                aria-label="QR Code Mode"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={qrMode === 'checkin'}
+                  onClick={() => setQrMode('checkin')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                    qrMode === 'checkin'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Check-In QR
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={qrMode === 'feedback'}
+                  onClick={() => setQrMode('feedback')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                    qrMode === 'feedback'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Feedback QR
+                </button>
+              </div>
+            </div>
+
             <div
               id="qr-print-sheet"
-              className="px-6 py-6 flex flex-col items-center text-center"
+              className="px-6 py-5 flex flex-col items-center text-center"
             >
               <div className="text-xs font-semibold uppercase tracking-wider text-blue-700">
                 {branding?.organizationName ? `${branding.organizationName} · PRESENZA` : 'PRESENZA'}
               </div>
               <h3 className="mt-1 text-lg font-bold text-slate-900 text-balance max-w-sm">
-                Scan to Clock In
+                {qrMode === 'feedback'
+                  ? 'Scan to Submit Feedback & Evaluation'
+                  : 'Scan to Clock In'}
               </h3>
 
               <div className="mt-4 p-4 rounded-2xl border border-slate-200 bg-white shadow-sm">
                 {qrDataUrl ? (
                   <img
                     src={qrDataUrl}
-                    alt={`QR Code for ${event.title}`}
-                    className="w-48 h-48 sm:w-56 sm:h-56 object-contain"
+                    alt={`${qrMode === 'feedback' ? 'Feedback' : 'Check-in'} QR Code for ${event.title}`}
+                    className="w-48 h-48 sm:w-52 sm:h-52 object-contain"
                   />
                 ) : (
-                  <div className="w-48 h-48 sm:w-56 sm:h-56 flex items-center justify-center bg-slate-50 text-xs text-slate-400">
+                  <div className="w-48 h-48 sm:w-52 sm:h-52 flex items-center justify-center bg-slate-50 text-xs text-slate-400">
                     Generating QR code...
                   </div>
                 )}
               </div>
 
               <p className="mt-3 text-xs text-slate-600 max-w-xs leading-relaxed">
-                No login or account needed. Scan with your phone camera, fill in name &amp; class, take a photo, and submit.
+                {qrMode === 'feedback'
+                  ? 'No login needed. Participants rate the session, tick quick feedback statements, and share written recommendations.'
+                  : 'No login or account needed. Scan with your phone camera, fill in name & class, take a photo, and submit.'}
               </p>
             </div>
 
@@ -224,8 +269,8 @@ export default function QrPosterModal({
                 <input
                   type="text"
                   readOnly
-                  value={checkInUrl}
-                  aria-label="Direct check-in URL"
+                  value={activeQrUrl}
+                  aria-label="Direct QR URL"
                   className="flex-1 min-w-0 px-3 py-2 text-xs font-mono-tabular bg-slate-50 border border-slate-200 rounded-lg text-slate-700"
                 />
                 <button
@@ -269,7 +314,11 @@ export default function QrPosterModal({
                   type="button"
                   onClick={() => {
                     onClose();
-                    onOpenCheckIn(event.id);
+                    if (qrMode === 'feedback' && onOpenFeedback) {
+                      onOpenFeedback(event.id);
+                    } else {
+                      onOpenCheckIn(event.id);
+                    }
                   }}
                   className="min-h-[40px] px-2.5 py-2 rounded-xl bg-blue-700 text-xs font-semibold text-white hover:bg-blue-800 transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap"
                 >

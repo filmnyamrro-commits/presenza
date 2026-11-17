@@ -7,6 +7,7 @@ import {
   LogOut,
   Mail,
   MapPin,
+  MessageSquare,
   RefreshCw,
   ShieldCheck,
   UserCheck,
@@ -51,6 +52,7 @@ interface ParticipantCheckInProps {
   requestedEventId: string | null;
   user?: User | null;
   onSelectEventId: (eventId: string | null) => void;
+  onGoToFeedback?: (eventId: string) => void;
   onGoToAdmin?: () => void;
 }
 
@@ -58,6 +60,7 @@ export default function ParticipantCheckIn({
   requestedEventId,
   user = null,
   onSelectEventId,
+  onGoToFeedback,
   onGoToAdmin,
 }: ParticipantCheckInProps) {
   const [activeEvents, setActiveEvents] = useState<EventRecord[]>([]);
@@ -425,6 +428,23 @@ export default function ParticipantCheckIn({
     try {
       await setDoc(doc(db, 'attendances', attendanceId), payload);
 
+      try {
+        window.localStorage.setItem(
+          `presenza_last_checkin_${selectedEvent.id}`,
+          JSON.stringify({
+            attendanceId,
+            fullName: cleanName,
+            classDepartment: cleanDept,
+            participantEmail:
+              requiresParticipantLogin && participantVerifiedEmail
+                ? participantVerifiedEmail
+                : '',
+          })
+        );
+      } catch {
+        // Ignore storage quota restrictions cleanly
+      }
+
       setReceipt({
         id: attendanceId,
         eventId: selectedEvent.id,
@@ -596,14 +616,26 @@ export default function ParticipantCheckIn({
                 ? 'Verified email recorded. You may close this page now.'
                 : 'No account or email required. You may close this page now.'}
             </span>
-            <button
-              type="button"
-              onClick={handleResetForNext}
-              className="w-full sm:w-auto min-h-[44px] px-5 py-2.5 rounded-xl border border-slate-300 bg-white text-sm font-semibold text-slate-800 hover:bg-slate-100 transition-colors flex items-center justify-center gap-2 whitespace-nowrap"
-            >
-              <RefreshCw className="w-4 h-4" />
-              <span>Check In Another Participant</span>
-            </button>
+            <div className="w-full sm:w-auto flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+              {onGoToFeedback && (
+                <button
+                  type="button"
+                  onClick={() => onGoToFeedback(receipt.eventId)}
+                  className="min-h-[44px] px-4 py-2.5 rounded-xl bg-blue-700 hover:bg-blue-800 text-white text-sm font-semibold transition-colors flex items-center justify-center gap-2 whitespace-nowrap"
+                >
+                  <MessageSquare className="w-4 h-4" />
+                  <span>Give Session Feedback</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleResetForNext}
+                className="min-h-[44px] px-5 py-2.5 rounded-xl border border-slate-300 bg-white text-sm font-semibold text-slate-800 hover:bg-slate-100 transition-colors flex items-center justify-center gap-2 whitespace-nowrap"
+              >
+                <RefreshCw className="w-4 h-4" />
+                <span>Check In Another Participant</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
