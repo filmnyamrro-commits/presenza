@@ -384,9 +384,26 @@ export default function AdminConsole({
     setSigningIn(true);
     try {
       await signInWithPopup(auth, googleProvider);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Sign-in was cancelled.';
-      setAuthError(msg);
+    } catch (err: unknown) {
+      const code =
+        typeof err === 'object' && err !== null && 'code' in err
+          ? String((err as { code?: unknown }).code)
+          : '';
+      if (code === 'auth/unauthorized-domain') {
+        const host = window.location.hostname;
+        setAuthError(
+          `Domain "${host}" is not authorized for Google sign-in. Add "${host}" in Firebase Console → Authentication → Settings → Authorized domains.`
+        );
+      } else if (code === 'auth/popup-blocked') {
+        setAuthError(
+          'Sign-in popup was blocked by your browser. Please allow popups for this site and try again.'
+        );
+      } else if (code === 'auth/popup-closed-by-user') {
+        setAuthError('Sign-in popup was closed before completing login.');
+      } else {
+        const msg = err instanceof Error ? err.message : 'Sign-in was cancelled.';
+        setAuthError(msg);
+      }
     } finally {
       setSigningIn(false);
     }
