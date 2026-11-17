@@ -1,0 +1,307 @@
+{
+  "entities": {
+    "Event": {
+      "title": "Event",
+      "description": "A workshop, seminar, meeting, or professional development session with an active QR check-in.",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 140,
+          "description": "Display name of the workshop, seminar, or session."
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Customizable session type."
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Optional agenda or facilitator note."
+        },
+        "venue": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Room, hall, or online meeting location."
+        },
+        "eventDate": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "description": "Scheduled date in YYYY-MM-DD format."
+        },
+        "startTime": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 5,
+          "pattern": "^[0-9]{2}:[0-9]{2}$",
+          "description": "Scheduled start time in 24-hour HH:MM format."
+        },
+        "lateCutoffTime": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 5,
+          "pattern": "^[0-9]{2}:[0-9]{2}$",
+          "description": "Cutoff time in 24-hour HH:MM format after which check-ins are marked Late."
+        },
+        "cutoffTimestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Exact cutoff timestamp for On Time vs Late classification."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "closed"],
+          "description": "Whether the session is currently accepting participant check-ins."
+        },
+        "createdByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "UID of the administrator who created the event."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the event was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the event was last updated."
+        },
+        "departmentLabel": {
+          "type": "string",
+          "maxLength": 80,
+          "description": "Custom label for the Class / Department field on the participant form."
+        },
+        "departmentPresets": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "Comma-separated quick-select department or class options."
+        },
+        "consentText": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Custom photo consent statement shown to participants."
+        },
+        "facilitators": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Facilitator name(s) printed on participant recognition certificates."
+        },
+        "principalName": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Principal name printed on participant recognition certificates."
+        }
+      },
+      "required": [
+        "title",
+        "category",
+        "description",
+        "venue",
+        "eventDate",
+        "startTime",
+        "lateCutoffTime",
+        "cutoffTimestamp",
+        "status",
+        "createdByUid",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Attendance": {
+      "title": "Attendance",
+      "description": "A participant attendance submission recorded without requiring participant login.",
+      "type": "object",
+      "properties": {
+        "eventId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "ID of the parent Event document."
+        },
+        "eventName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 140,
+          "description": "Snapshot of the event title at check-in time."
+        },
+        "fullName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100,
+          "description": "Participant full name."
+        },
+        "classDepartment": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Participant class, grade, or department."
+        },
+        "photoDataUrl": {
+          "type": "string",
+          "minLength": 30,
+          "maxLength": 250000,
+          "description": "Compressed participant photo encoded as an image data URL."
+        },
+        "photoConsent": {
+          "type": "boolean",
+          "description": "Explicit participant consent for photo use."
+        },
+        "attendanceDate": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "description": "Attendance date in YYYY-MM-DD format."
+        },
+        "checkInTime": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 32,
+          "description": "Formatted check-in clock time."
+        },
+        "serverTimestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Authoritative Firestore server timestamp."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["On Time", "Late"],
+          "description": "Attendance timeliness status."
+        },
+        "lateExcuse": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "Participant explanation for late arrival (required when status is Late)."
+        }
+      },
+      "required": [
+        "eventId",
+        "eventName",
+        "fullName",
+        "classDepartment",
+        "photoDataUrl",
+        "photoConsent",
+        "attendanceDate",
+        "checkInTime",
+        "serverTimestamp",
+        "status",
+        "lateExcuse"
+      ]
+    },
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Authorized administrator document.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "addedByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "displayName", "addedByUid", "createdAt"]
+    },
+    "DashboardSetting": {
+      "title": "DashboardSetting",
+      "description": "Administrator live dashboard background configuration.",
+      "type": "object",
+      "properties": {
+        "backgroundDataUrl": {
+          "type": "string",
+          "minLength": 30,
+          "maxLength": 450000,
+          "description": "JPEG data URL used as the live dashboard portrait background."
+        },
+        "updatedByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["backgroundDataUrl", "updatedByUid", "updatedAt"]
+    },
+    "OrganizationBranding": {
+      "title": "OrganizationBranding",
+      "description": "School or company name and uploaded logo displayed in the top-left header, QR board, and exports.",
+      "type": "object",
+      "properties": {
+        "organizationName": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "School or company name shown next to the logo in the top-left position."
+        },
+        "logoDataUrl": {
+          "type": "string",
+          "maxLength": 350000,
+          "description": "Compressed PNG, JPEG, or WebP data URL of the school or company logo."
+        },
+        "updatedByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["organizationName", "logoDataUrl", "updatedByUid", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/events/{eventId}": {
+      "schema": { "$ref": "#/entities/Event" },
+      "description": "Workshop, seminar, meeting, and professional development sessions."
+    },
+    "/attendances/{attendanceId}": {
+      "schema": { "$ref": "#/entities/Attendance" },
+      "description": "Participant attendance submissions linked to an active event."
+    },
+    "/admins/{adminUid}": {
+      "schema": { "$ref": "#/entities/AdminUser" },
+      "description": "Authorized administrator accounts."
+    },
+    "/dashboardSettings/{settingId}": {
+      "schema": { "$ref": "#/entities/DashboardSetting" },
+      "description": "Live dashboard appearance settings controlled by administrators."
+    },
+    "/branding/{brandingId}": {
+      "schema": { "$ref": "#/entities/OrganizationBranding" },
+      "description": "School or company logo and display name controlled by administrators."
+    }
+  }
+}
